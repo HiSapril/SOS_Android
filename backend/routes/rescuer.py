@@ -366,7 +366,7 @@ async def release_rescue(sos_id: str, current_user: dict = Depends(require_rescu
     """
     F13 / UC12: Đội cứu hộ nhả ca khi không thể tiếp tục (chỉ khi đang ACCEPTED hoặc RESCUING).
     Thực hiện trong một giao dịch:
-    - status quay về WAITING, accepted_by và accepted_at về NULL.
+    - status quay về WAITING, team_id về NULL.
     - Xóa vị trí của RESCUER trong location_current và location_history.
     - SOS tự động xuất hiện lại trong view rescue_queue.
     """
@@ -500,7 +500,7 @@ async def complete_rescue(sos_id: str, current_user: dict = Depends(require_resc
     F14 / UC13 / M06-R: Đội cứu hộ hoàn thành ca sau khi đã tiếp cận và hỗ trợ nạn nhân.
     Tiền điều kiện: Trạng thái hiện tại phải là ARRIVED.
     Tác động:
-    - status = 'COMPLETED', ended_at = now(), end_reason = 'RESCUER_COMPLETED'.
+    - status = 'COMPLETED', updated_at = now(), ghi vết vào sos_logs.
     - Dừng tracking realtime, xóa location_current (RB09).
     - Giải phóng ca cứu hộ của RESCUER.
     """

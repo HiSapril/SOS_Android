@@ -12,7 +12,7 @@ async def check_expired_sos():
     """
     Ràng buộc RB07:
     Tác vụ định kỳ kiểm tra các SOS ở trạng thái WAITING quá 2 giờ.
-    Chuyển trạng thái sang CANCELLED với end_reason = 'EXPIRED'.
+    Chuyển trạng thái sang CANCELLED và ghi nhận nhật ký vào sos_logs.
     Xóa location_current và thông báo qua WebSocket (RB09).
     """
     try:
