@@ -81,13 +81,37 @@ async def check_expired_sos():
     except Exception as e:
         logger.error(f"Lỗi khi kiểm tra SOS quá hạn: {e}")
 
+async def cleanup_unverified_users():
+    """
+    Tác vụ định kỳ: Xóa các tài khoản tạm (chỉ mới bấm bot Telegram nhưng chưa nhập OTP)
+    đã tồn tại quá 24 giờ để tránh rác CSDL.
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    DELETE FROM users 
+                    WHERE is_valid = false 
+                      AND created_at < now() - INTERVAL '24 hours'
+                    RETURNING phone;
+                    """
+                )
+                deleted = cursor.fetchall()
+                if deleted:
+                    logger.info(f"Đã dọn dẹp {len(deleted)} tài khoản tạm (chưa xác thực OTP) quá hạn 24 giờ.")
+    except Exception as e:
+        logger.error(f"Lỗi khi dọn dẹp tài khoản tạm: {e}")
+
 def start_scheduler():
     """Khởi động lịch trình chạy nền"""
     global _scheduler
     if _scheduler is None:
         _scheduler = AsyncIOScheduler()
-        # Chạy kiểm tra mỗi 60 giây
+        # Chạy kiểm tra mỗi 60 giây cho SOS quá hạn (RB07)
         _scheduler.add_job(check_expired_sos, "interval", seconds=60, id="check_expired_sos")
+        # Chạy kiểm tra dọn dẹp tài khoản tạm mỗi 1 giờ
+        _scheduler.add_job(cleanup_unverified_users, "interval", hours=1, id="cleanup_unverified_users")
         _scheduler.start()
         logger.info("Bộ lập lịch tác vụ định kỳ (Scheduler) đã khởi động!")
 

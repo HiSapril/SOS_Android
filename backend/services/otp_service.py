@@ -11,7 +11,6 @@ class InMemoryOtpStore:
     - Lưu mã OTP dạng băm SHA-256 an toàn.
     - Hạn sử dụng (mặc định 5 phút).
     - Giới hạn số lần nhập sai (mặc định tối đa 5 lần).
-    - Giới hạn tần suất yêu cầu mã (tối thiểu 30 giây giữa 2 lần).
     - Mỗi mã chỉ dùng 1 lần (tự động xóa ngay khi xác thực thành công).
     """
     def __init__(self):

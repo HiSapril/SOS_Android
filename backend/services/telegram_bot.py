@@ -115,26 +115,33 @@ async def send_otp_telegram(phone: str, chat_id: int, otp_code: str) -> bool:
         return False
 
 async def start_telegram_bot():
-    """Khởi động Telegram Bot polling trong background nếu có token"""
+    """Khởi động Telegram Bot polling trong background nếu có token, tự động thử lại nếu mạng chập chờn"""
     global _bot_app, _bot_task
     if not config.TELEGRAM_BOT_TOKEN:
         logger.warning("TELEGRAM_BOT_TOKEN không được cung cấp. Chạy chế độ MOCK OTP cho kiểm thử và demo.")
         return
 
-    try:
-        logger.info("Đang khởi tạo Telegram Bot...")
-        _bot_app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
-        _bot_app.add_handler(CommandHandler("start", start_command))
-        _bot_app.add_handler(CommandHandler("help", help_command))
-        _bot_app.add_handler(MessageHandler(filters.CONTACT, contact_handler))
-        _bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, non_contact_handler))
+    max_retries = 5
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"Đang khởi tạo Telegram Bot (lần thử {attempt}/{max_retries})...")
+            _bot_app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
+            _bot_app.add_handler(CommandHandler("start", start_command))
+            _bot_app.add_handler(CommandHandler("help", help_command))
+            _bot_app.add_handler(MessageHandler(filters.CONTACT, contact_handler))
+            _bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, non_contact_handler))
 
-        await _bot_app.initialize()
-        await _bot_app.start()
-        _bot_task = asyncio.create_task(_bot_app.updater.start_polling())
-        logger.info("Telegram Bot đã khởi động và đang lắng nghe tin nhắn!")
-    except Exception as e:
-        logger.error(f"Không thể khởi động Telegram Bot: {e}")
+            await _bot_app.initialize()
+            await _bot_app.start()
+            _bot_task = asyncio.create_task(_bot_app.updater.start_polling())
+            logger.info("✅ Telegram Bot đã khởi động và đang lắng nghe tin nhắn!")
+            return
+        except Exception as e:
+            logger.warning(f"Lỗi khi khởi động Telegram Bot (lần {attempt}): {e}")
+            if attempt < max_retries:
+                await asyncio.sleep(3)
+            else:
+                logger.error("❌ Không thể kết nối tới Telegram API sau nhiều lần thử. Vui lòng kiểm tra kết nối mạng/proxy/VPN.")
 
 async def stop_telegram_bot():
     """Dừng Telegram Bot an toàn khi tắt server"""
@@ -142,8 +149,10 @@ async def stop_telegram_bot():
     if _bot_app is not None:
         try:
             logger.info("Đang dừng Telegram Bot...")
-            await _bot_app.updater.stop()
-            await _bot_app.stop()
+            if _bot_app.updater and _bot_app.updater.running:
+                await _bot_app.updater.stop()
+            if _bot_app.running:
+                await _bot_app.stop()
             await _bot_app.shutdown()
             logger.info("Telegram Bot đã dừng thành công.")
         except Exception as e:
