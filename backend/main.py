@@ -18,6 +18,7 @@ from routes.users import router as users_router
 from routes.sos import router as sos_router
 from routes.rescuer import router as rescuer_router
 from routes.location import router as location_router
+from routes.emergency_types import router as emergency_types_router
 
 # Thiết lập ghi log
 logging.basicConfig(
@@ -76,6 +77,7 @@ app.include_router(users_router)
 app.include_router(sos_router)
 app.include_router(rescuer_router)
 app.include_router(location_router)
+app.include_router(emergency_types_router)
 
 @app.get("/", summary="Trang thông tin tổng quan hệ thống")
 def root():

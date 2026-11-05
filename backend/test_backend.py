@@ -68,8 +68,22 @@ def test_full_rescue_workflow():
             assert new_u["is_valid"] is False, "Người dùng mới phải có is_valid = False trước khi xác nhận OTP!"
     print("✅ Ràng buộc đúng: Người dùng mới có is_valid = False.")
 
-    # 2b. Yêu cầu mã OTP
-    otp_req = client.post("/api/auth/request-otp", json={"phone": test_phone})
+    # 2b. Kiểm tra ràng buộc role khi yêu cầu OTP
+    # Không kèm role -> 422 Unprocessable Entity
+    no_role_res = client.post("/api/auth/request-otp", json={"phone": test_phone})
+    assert no_role_res.status_code == 422, "Thiếu role phải bị từ chối 422"
+
+    # Role sai giá trị -> 422 Unprocessable Entity
+    invalid_role_res = client.post("/api/auth/request-otp", json={"phone": test_phone, "role": "ADMIN"})
+    assert invalid_role_res.status_code == 422, "Role sai giá trị phải bị từ chối 422"
+
+    # Số điện thoại role USER nhưng gửi role RESCUER -> 400 Bad Request
+    wrong_role_res = client.post("/api/auth/request-otp", json={"phone": test_phone, "role": "RESCUER"})
+    assert wrong_role_res.status_code == 400, "Sai vai trò tài khoản phải bị từ chối 400"
+    print("✅ Kiểm tra chặn sai role thành công:", wrong_role_res.json()["detail"])
+
+    # Yêu cầu mã OTP hợp lệ với đúng role USER
+    otp_req = client.post("/api/auth/request-otp", json={"phone": test_phone, "role": "USER"})
     assert otp_req.status_code == 200, f"Yêu cầu OTP thất bại: {otp_req.text}"
     otp_data = otp_req.json()
     otp_code = otp_data.get("dev_otp")
@@ -81,11 +95,10 @@ def test_full_rescue_workflow():
     assert wrong_verify.status_code == 400
     print("✅ Kiểm tra chặn mã OTP sai thành công:", wrong_verify.json()["detail"])
 
-    # 2d. Nhập đúng mã OTP để đăng ký tài khoản USER mới
+    # 2d. Nhập đúng mã OTP để đăng ký tài khoản USER mới (chỉ cần phone và otp)
     verify_res = client.post("/api/auth/verify-otp", json={
         "phone": test_phone,
-        "otp": otp_code,
-        "full_name": "Kiểm Thử Viên SOS"
+        "otp": otp_code
     })
     assert verify_res.status_code == 200, f"Xác minh OTP thất bại: {verify_res.text}"
     auth_data = verify_res.json()
@@ -95,6 +108,8 @@ def test_full_rescue_workflow():
     assert user_info["role"] == "USER"
     assert user_info["account_status"] == "ACTIVE"
     assert user_info["is_valid"] is True, "Sau khi xác nhận OTP, is_valid phải là True!"
+    assert user_info["full_name"] == test_phone, f"Mặc định ban đầu full_name phải là SĐT ({test_phone}), thực tế: {user_info['full_name']}"
+    print(f"✅ Mặc định họ tên ban đầu khớp SĐT: {user_info['full_name']}")
 
     # Ràng buộc: Trong DB is_valid đã chuyển sang True
     with get_db_connection() as conn:
@@ -103,16 +118,16 @@ def test_full_rescue_workflow():
             assert cur.fetchone()["is_valid"] is True, "is_valid trong PostgreSQL phải là True!"
     print("✅ Đăng ký và cấp JWT token thành công cho USER. is_valid đã chuyển thành True:", user_info)
 
-    # 3. Xem và cập nhật hồ sơ cá nhân
-    print_step("3. Xem và cập nhật hồ sơ cá nhân")
+    # 3. Xem và cập nhật hồ sơ cá nhân qua API đổi họ tên mới /api/users/full-name
+    print_step("3. Xem và cập nhật họ tên qua API /api/users/full-name")
     me_res = client.get("/api/auth/me", headers=user_headers)
     assert me_res.status_code == 200
     print("✅ /api/auth/me trả về chính xác tài khoản hiện tại.")
 
-    update_prof = client.put("/api/users/profile", json={"full_name": "Nguyễn Văn Nạn Nhân"}, headers=user_headers)
+    update_prof = client.put("/api/users/full-name", json={"full_name": "Nguyễn Văn Nạn Nhân"}, headers=user_headers)
     assert update_prof.status_code == 200
     assert update_prof.json()["user"]["full_name"] == "Nguyễn Văn Nạn Nhân"
-    print("✅ Cập nhật họ tên thành công:", update_prof.json()["user"]["full_name"])
+    print("✅ Cập nhật họ tên thành công qua /api/users/full-name:", update_prof.json()["user"]["full_name"])
 
     # 4. Tạo yêu cầu SOS (F04, UC03, RB01, RB02, RB03, RB04)
     print_step("4. Tạo yêu cầu SOS (F04, UC03, RB01, RB02, RB04)")
@@ -163,7 +178,12 @@ def test_full_rescue_workflow():
     print_step("8. Đăng nhập tài khoản RESCUER (0901112222)")
     rescuer_phone = "0901112222"
     otp_store.clear(rescuer_phone)
-    r_otp_req = client.post("/api/auth/request-otp", json={"phone": rescuer_phone})
+    # Thử yêu cầu với role USER cho SĐT RESCUER -> 400
+    r_wrong_role = client.post("/api/auth/request-otp", json={"phone": rescuer_phone, "role": "USER"})
+    assert r_wrong_role.status_code == 400, "RESCUER xin OTP với role USER phải bị chặn"
+    print("✅ Kiểm tra chặn SĐT RESCUER gửi role USER:", r_wrong_role.json()["detail"])
+
+    r_otp_req = client.post("/api/auth/request-otp", json={"phone": rescuer_phone, "role": "RESCUER"})
     assert r_otp_req.status_code == 200
     r_otp_code = r_otp_req.json().get("dev_otp")
 

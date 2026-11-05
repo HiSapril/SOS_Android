@@ -66,12 +66,12 @@ async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Nếu người dùng chưa có tài khoản: tạo mới với is_valid = false
                 cursor.execute(
                     """
-                    INSERT INTO users (full_name, phone, telegram_chat_id, role, account_status, is_valid)
-                    VALUES (%s, %s, %s, 'USER', 'ACTIVE', false)
+                    INSERT INTO users (full_name, phone, telegram_chat_id, account_status, is_valid)
+                    VALUES (%s, %s, %s, 'ACTIVE', false)
                     ON CONFLICT (phone) DO UPDATE 
                     SET telegram_chat_id = EXCLUDED.telegram_chat_id
                     """,
-                    (f"Người dùng {phone[-4:]}", phone, chat_id)
+                    (phone, phone, chat_id)
                 )
         
         logger.info(f"Đã liên kết Telegram chat_id={chat_id} với số điện thoại={phone} trong bảng users")

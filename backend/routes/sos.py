@@ -1,7 +1,7 @@
 import logging
 from typing import Optional, Literal
 from fastapi import APIRouter, HTTPException, status, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 import psycopg.errors
 from database.connection import get_db_connection
 from services.auth_service import get_current_user
@@ -11,11 +11,20 @@ logger = logging.getLogger("backend.sos")
 router = APIRouter(prefix="/api/sos", tags=["Yêu cầu SOS (USER)"])
 
 class CreateSosDto(BaseModel):
-    emergency_type: str = Field(..., min_length=1, max_length=30, description="Loại sự cố (VD: TAI_NAN, NGAP_LUT, CHAY, MAC_KET, KHAC)")
+    emergency_type_id: Optional[str] = Field(None, description="UUID của loại sự cố trong bảng emergency_types")
+    emergency_type: Optional[str] = Field(None, max_length=50, description="Tên định danh loại sự cố (VD: TAI_NAN, NGAP_LUT, CHAY_NO, KHAC)")
     description: Optional[str] = Field(None, max_length=500, description="Mô tả tình huống khẩn cấp")
     visibility: Literal["PUBLIC", "PRIVATE"] = Field(default="PRIVATE", description="Chế độ chia sẻ: PUBLIC hoặc PRIVATE (mặc định PRIVATE)")
     initial_lat: float = Field(..., ge=-90.0, le=90.0, description="Vĩ độ GPS hiện tại (-90 đến 90)")
     initial_lng: float = Field(..., ge=-180.0, le=180.0, description="Kinh độ GPS hiện tại (-180 đến 180)")
+
+    @model_validator(mode="after")
+    def validate_type(self) -> "CreateSosDto":
+        if not self.emergency_type_id and not self.emergency_type:
+            raise ValueError("Vui lòng cung cấp emergency_type_id hoặc emergency_type.")
+        if self.emergency_type is not None and not self.emergency_type.strip():
+            raise ValueError("Loại sự cố không được để trống.")
+        return self
 
 class ChangeVisibilityDto(BaseModel):
     visibility: Literal["PUBLIC", "PRIVATE"]
@@ -24,6 +33,7 @@ class ChangeVisibilityDto(BaseModel):
 async def create_sos(dto: CreateSosDto, current_user: dict = Depends(get_current_user)):
     """
     F04 & UC03: Người dùng tạo yêu cầu SOS kèm vị trí GPS và tình huống.
+    Hỗ trợ truyền emergency_type_id (UUID) hoặc emergency_type (Tên định danh).
     Ràng buộc RB01: requester_id lấy từ token phiên đăng nhập.
     Ràng buộc RB02: Tọa độ hợp lệ.
     Ràng buộc RB04: Mỗi người gửi chỉ có tối đa 1 SOS chưa kết thúc.
@@ -36,10 +46,11 @@ async def create_sos(dto: CreateSosDto, current_user: dict = Depends(get_current
                 # 1. Kiểm tra chủ động xem người dùng có SOS đang hoạt động không (RB04)
                 cursor.execute(
                     """
-                    SELECT id, status, emergency_type, created_at
-                    FROM sos_requests
-                    WHERE requester_id = %s
-                      AND status IN ('WAITING', 'ACCEPTED', 'RESCUING', 'ARRIVED')
+                    SELECT s.id, s.status, et.name AS emergency_type, s.created_at
+                    FROM sos_requests s
+                    JOIN emergency_types et ON s.emergency_type_id = et.id
+                    WHERE s.requester_id = %s
+                      AND s.status IN ('WAITING', 'ACCEPTED', 'RESCUING', 'ARRIVED')
                     LIMIT 1
                     """,
                     (user_id,)
@@ -55,23 +66,51 @@ async def create_sos(dto: CreateSosDto, current_user: dict = Depends(get_current
                         }
                     )
 
-                # 2. Ghi bản ghi sos_requests trong một giao dịch (chuẩn hóa theo ERD)
+                # 2. Phân giải emergency_type_id và emergency_type name từ bảng emergency_types
+                type_val = (dto.emergency_type_id or dto.emergency_type or "KHAC").strip()
+                cursor.execute(
+                    """
+                    SELECT id, name FROM emergency_types 
+                    WHERE id::text = %s OR name = %s
+                    LIMIT 1
+                    """,
+                    (type_val, type_val.upper())
+                )
+                et_row = cursor.fetchone()
+                if not et_row:
+                    # Nếu chưa có, tự động tạo mới loại sự cố trong bảng emergency_types
+                    type_name = type_val.upper()
+                    cursor.execute(
+                        """
+                        INSERT INTO emergency_types (name, description)
+                        VALUES (%s, %s)
+                        ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+                        RETURNING id, name
+                        """,
+                        (type_name, f"Loại sự cố {type_name}")
+                    )
+                    et_row = cursor.fetchone()
+
+                resolved_type_id = et_row["id"]
+                resolved_type_name = et_row["name"]
+
+                # 3. Ghi bản ghi sos_requests trong một giao dịch
                 cursor.execute(
                     """
                     INSERT INTO sos_requests (
-                        requester_id, emergency_type, description, visibility,
+                        requester_id, emergency_type_id, description, visibility,
                         status, created_at, updated_at
                     )
                     VALUES (%s, %s, %s, %s, 'WAITING', now(), now())
-                    RETURNING id, requester_id, emergency_type, description, visibility,
+                    RETURNING id, requester_id, emergency_type_id, description, visibility,
                               status, created_at
                     """,
-                    (user_id, dto.emergency_type, dto.description, dto.visibility)
+                    (user_id, resolved_type_id, dto.description, dto.visibility)
                 )
                 sos_record = cursor.fetchone()
                 sos_id = sos_record["id"]
 
-                # 3. Khởi tạo điểm vị trí ban đầu trong location_current và location_history (actor='VICTIM')
+                # 4. Khởi tạo điểm vị trí ban đầu trong location_current và location_history (actor='VICTIM')
                 cursor.execute(
                     """
                     INSERT INTO location_current (sos_id, actor, lat, lng, updated_at)
@@ -88,22 +127,22 @@ async def create_sos(dto: CreateSosDto, current_user: dict = Depends(get_current
                     (sos_id, dto.initial_lat, dto.initial_lng)
                 )
 
-                # 4. Ghi nhật ký vào sos_logs (ERD Table 10)
+                # 5. Ghi nhật ký vào sos_logs (ERD Table 10)
                 cursor.execute(
                     """
                     INSERT INTO sos_logs (sos_id, user_id, action, description, created_at)
                     VALUES (%s, %s, 'CREATE_SOS', %s, now())
                     """,
-                    (sos_id, user_id, f"Khởi tạo tín hiệu SOS khẩn cấp loại {dto.emergency_type} ({dto.visibility})")
+                    (sos_id, user_id, f"Khởi tạo tín hiệu SOS khẩn cấp loại {resolved_type_name} ({dto.visibility})")
                 )
 
-                # 5. Tạo thông báo vào sos_notifications (ERD Table 9)
+                # 6. Tạo thông báo vào sos_notifications (ERD Table 9)
                 cursor.execute(
                     """
                     INSERT INTO sos_notifications (sos_id, user_id, message, type, created_at)
                     VALUES (%s, %s, %s, 'SYSTEM', now())
                     """,
-                    (sos_id, user_id, f"Yêu cầu SOS [{dto.emergency_type}] đã được gửi đi và đang chờ đội cứu hộ tiếp nhận.")
+                    (sos_id, user_id, f"Yêu cầu SOS [{resolved_type_name}] đã được gửi đi và đang chờ đội cứu hộ tiếp nhận.")
                 )
 
     except psycopg.errors.UniqueViolation:
@@ -114,11 +153,12 @@ async def create_sos(dto: CreateSosDto, current_user: dict = Depends(get_current
 
     sos_id_str = str(sos_id)
 
-    # 4. Phát sự kiện SOS mới qua WebSocket cho tất cả các RESCUER (UC03 / UC07)
+    # 7. Phát sự kiện SOS mới qua WebSocket cho tất cả các RESCUER (UC03 / UC07)
     await ws_manager.broadcast_to_rescuers({
         "type": "NEW_SOS",
         "sos_id": sos_id_str,
-        "emergency_type": dto.emergency_type,
+        "emergency_type": resolved_type_name,
+        "emergency_type_id": str(resolved_type_id),
         "visibility": dto.visibility,
         "initial_lat": dto.initial_lat,
         "initial_lng": dto.initial_lng,
@@ -131,7 +171,8 @@ async def create_sos(dto: CreateSosDto, current_user: dict = Depends(get_current
         "sos": {
             "id": sos_id_str,
             "requester_id": str(sos_record["requester_id"]),
-            "emergency_type": sos_record["emergency_type"],
+            "emergency_type": resolved_type_name,
+            "emergency_type_id": str(resolved_type_id),
             "description": sos_record["description"],
             "visibility": sos_record["visibility"],
             "initial_lat": dto.initial_lat,
@@ -152,10 +193,11 @@ def get_my_active_sos(current_user: dict = Depends(get_current_user)):
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT s.id, s.requester_id, s.team_id, s.emergency_type, s.description, s.visibility,
-                       s.status, s.created_at, s.updated_at,
+                SELECT s.id, s.requester_id, s.team_id, et.name AS emergency_type, s.emergency_type_id,
+                       s.description, s.visibility, s.status, s.created_at, s.updated_at,
                        t.name AS team_name, t.description AS team_description
                 FROM sos_requests s
+                JOIN emergency_types et ON s.emergency_type_id = et.id
                 LEFT JOIN rescue_teams t ON s.team_id = t.team_id
                 WHERE s.requester_id = %s
                   AND s.status IN ('WAITING', 'ACCEPTED', 'RESCUING', 'ARRIVED')
@@ -279,11 +321,12 @@ def get_sos_detail(sos_id: str, current_user: dict = Depends(get_current_user)):
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT s.id, s.requester_id, s.team_id, s.emergency_type, s.description,
-                       s.visibility, s.status, s.created_at, s.updated_at,
+                SELECT s.id, s.requester_id, s.team_id, et.name AS emergency_type, s.emergency_type_id,
+                       s.description, s.visibility, s.status, s.created_at, s.updated_at,
                        u.full_name AS requester_name, u.phone AS requester_phone,
                        t.name AS team_name
                 FROM sos_requests s
+                JOIN emergency_types et ON s.emergency_type_id = et.id
                 JOIN users u ON s.requester_id = u.id
                 LEFT JOIN rescue_teams t ON s.team_id = t.team_id
                 WHERE s.id = %s

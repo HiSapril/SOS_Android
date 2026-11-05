@@ -41,18 +41,24 @@ def check(assertion, message):
         print(f"  [FAIL] {message}")
         assert False, message
 
-def get_auth_token(phone: str, full_name: str = None) -> tuple[str, dict]:
+def get_auth_token(phone: str, full_name: str = None, role: str = "USER") -> tuple[str, dict]:
     """Helper lấy token nhanh cho test"""
-    # Đảm bảo liên kết telegram
-    client.post("/api/auth/dev-link-telegram", json={"phone": phone, "telegram_chat_id": abs(hash(phone)) % 100000000})
+    # Đảm bảo liên kết telegram và gán role cho test
+    client.post("/api/auth/dev-link-telegram", json={"phone": phone, "telegram_chat_id": abs(hash(phone)) % 100000000, "role": role})
     # Reset OTP cũ trong bộ nhớ RAM
     otp_store.clear(normalize_phone(phone))
     
-    req = client.post("/api/auth/request-otp", json={"phone": phone})
+    req = client.post("/api/auth/request-otp", json={"phone": phone, "role": role})
     otp = req.json().get("dev_otp")
-    verify = client.post("/api/auth/verify-otp", json={"phone": phone, "otp": otp, "full_name": full_name})
+    verify = client.post("/api/auth/verify-otp", json={"phone": phone, "otp": otp})
     data = verify.json()
-    return data["access_token"], data["user"]
+    token = data["access_token"]
+    user = data["user"]
+    if full_name:
+        prof_res = client.put("/api/users/full-name", json={"full_name": full_name}, headers={"Authorization": f"Bearer {token}"})
+        if prof_res.status_code == 200:
+            user = prof_res.json()["user"]
+    return token, user
 
 def run_deep_verification():
     print("\n" + "=" * 70)
@@ -74,8 +80,8 @@ def run_deep_verification():
     print("\n👉 PHẦN 2: Kiểm tra bảo mật & Phân quyền (RBAC & Access Control)")
     token_user_a, user_a = get_auth_token("0971000001", "User A")
     token_user_b, user_b = get_auth_token("0972000002", "User B")
-    token_rescuer_1, rescuer_1 = get_auth_token("0901112222") # Rescuer Q1
-    token_rescuer_2, rescuer_2 = get_auth_token("0903334444") # Rescuer Q2
+    token_rescuer_1, rescuer_1 = get_auth_token("0901112222", role="RESCUER") # Rescuer Q1
+    token_rescuer_2, rescuer_2 = get_auth_token("0903334444", role="RESCUER") # Rescuer Q2
 
     check(user_a["is_valid"] is True, "User A xác thực OTP thành công, có is_valid = True")
     check(rescuer_1["is_valid"] is True, "Rescuer 1 xác thực OTP thành công, có is_valid = True")
@@ -128,11 +134,11 @@ def run_deep_verification():
     # Xóa OTP cũ trong bộ nhớ RAM của số này để kiểm tra chính xác
     otp_store.clear(test_rate_phone)
     # Lần 1: Thành công
-    otp1 = client.post("/api/auth/request-otp", json={"phone": test_rate_phone})
+    otp1 = client.post("/api/auth/request-otp", json={"phone": test_rate_phone, "role": "USER"})
     check(otp1.status_code == 200, "Gửi OTP lần 1 thành công")
 
     # Lần 2 gửi liền: Bị 429 Too Many Requests
-    otp2 = client.post("/api/auth/request-otp", json={"phone": test_rate_phone})
+    otp2 = client.post("/api/auth/request-otp", json={"phone": test_rate_phone, "role": "USER"})
     check(otp2.status_code == 429, "Gửi OTP liên tiếp trong 30s bị chặn 429 Too Many Requests")
 
     # Thử nhập sai 5 lần để khóa OTP
@@ -259,10 +265,10 @@ def run_deep_verification():
             cur.execute(
                 """
                 INSERT INTO sos_requests (
-                    requester_id, emergency_type, visibility,
+                    requester_id, emergency_type_id, visibility,
                     status, created_at
                 )
-                VALUES (%s, 'NGAP_LUT', 'PUBLIC', 'WAITING', now() - INTERVAL '3 hours')
+                VALUES (%s, (SELECT id FROM emergency_types WHERE name = 'NGAP_LUT' LIMIT 1), 'PUBLIC', 'WAITING', now() - INTERVAL '3 hours')
                 RETURNING id
                 """,
                 (user_b["id"],)

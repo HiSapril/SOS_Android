@@ -66,10 +66,11 @@ def get_my_active_rescue(current_user: dict = Depends(require_rescuer)):
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT s.id, s.requester_id, s.team_id, s.emergency_type, s.description, s.visibility,
+                SELECT s.id, s.requester_id, s.team_id, et.name AS emergency_type, s.emergency_type_id, s.description, s.visibility,
                        s.status, s.created_at, s.updated_at,
                        u.full_name AS victim_name, u.phone AS victim_phone
                 FROM sos_requests s
+                JOIN emergency_types et ON s.emergency_type_id = et.id
                 JOIN rescue_team_members m ON s.team_id = m.team_id
                 JOIN users u ON s.requester_id = u.id
                 WHERE m.user_id = %s
@@ -181,7 +182,7 @@ async def accept_sos(sos_id: str, current_user: dict = Depends(require_rescuer))
                     WHERE id = %s
                       AND status = 'WAITING'
                       AND (now() - created_at <= INTERVAL '2 hours')
-                    RETURNING id, requester_id, status, emergency_type, team_id
+                    RETURNING id, requester_id, status, emergency_type_id, team_id
                     """,
                     (team_id, sos_id)
                 )
@@ -376,9 +377,10 @@ async def release_rescue(sos_id: str, current_user: dict = Depends(require_rescu
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT id, requester_id, team_id, status, emergency_type, visibility, created_at
-                FROM sos_requests
-                WHERE id = %s
+                SELECT s.id, s.requester_id, s.team_id, s.status, et.name AS emergency_type, s.emergency_type_id, s.visibility, s.created_at
+                FROM sos_requests s
+                JOIN emergency_types et ON s.emergency_type_id = et.id
+                WHERE s.id = %s
                 """,
                 (sos_id,)
             )

@@ -81,7 +81,14 @@ def get_current_user(credentials: Annotated[HTTPAuthorizationCredentials, Depend
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
-                "SELECT id, full_name, phone, role, account_status, is_valid, created_at FROM users WHERE id = %s",
+                """
+                SELECT u.id, u.full_name, u.phone, u.account_status, u.is_valid, u.created_at,
+                       CASE WHEN rtm.user_id IS NOT NULL THEN 'RESCUER' ELSE 'USER' END AS role
+                FROM users u
+                LEFT JOIN rescue_team_members rtm ON rtm.user_id = u.id
+                WHERE u.id = %s
+                LIMIT 1
+                """,
                 (user_id,)
             )
             user = cursor.fetchone()

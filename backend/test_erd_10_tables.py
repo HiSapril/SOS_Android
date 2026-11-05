@@ -31,7 +31,7 @@ def test_erd_10_tables():
     # Reset OTP cho 0901112222 trong bộ nhớ
     otp_store.clear("0901112222")
     
-    r_otp = client.post("/api/auth/request-otp", json={"phone": "0901112222"}).json().get("dev_otp")
+    r_otp = client.post("/api/auth/request-otp", json={"phone": "0901112222", "role": "RESCUER"}).json().get("dev_otp")
     r_auth = client.post("/api/auth/verify-otp", json={"phone": "0901112222", "otp": r_otp}).json()
     assert r_auth["user"]["is_valid"] is True
     r_token = r_auth["access_token"]
@@ -56,7 +56,7 @@ def test_erd_10_tables():
             # Dọn dẹp SOS cũ nếu còn active
             cur.execute("UPDATE sos_requests SET status = 'CANCELLED' WHERE status NOT IN ('COMPLETED', 'CANCELLED')")
 
-    u_otp = client.post("/api/auth/request-otp", json={"phone": "0901234567"}).json().get("dev_otp")
+    u_otp = client.post("/api/auth/request-otp", json={"phone": "0901234567", "role": "USER"}).json().get("dev_otp")
     u_auth = client.post("/api/auth/verify-otp", json={"phone": "0901234567", "otp": u_otp}).json()
     assert u_auth["user"]["is_valid"] is True
     u_token = u_auth["access_token"]

@@ -36,10 +36,11 @@ backend/
 
 Cơ sở dữ liệu được tinh giản và tối ưu hóa cao độ, bao gồm **8 bảng thực thể** và **2 view**:
 
-1. **`users`**: Khóa chính UUID (`gen_random_uuid()`), họ tên, số điện thoại (`phone UNIQUE`), Telegram Chat ID (`telegram_chat_id BIGINT UNIQUE`), vai trò (`USER` hoặc `RESCUER`), trạng thái (`ACTIVE` hoặc `DISABLED`), thuộc tính hợp lệ (`is_valid BOOLEAN NOT NULL DEFAULT false`), thời gian tạo. Đã loại bỏ hoàn toàn `password_hash`.
+1. **`users`**: Khóa chính UUID (`gen_random_uuid()`), họ tên (`full_name`, mặc định khi tạo là `phone`), số điện thoại (`phone UNIQUE`), Telegram Chat ID (`telegram_chat_id BIGINT UNIQUE`), trạng thái (`ACTIVE` hoặc `DISABLED`), thuộc tính hợp lệ (`is_valid BOOLEAN NOT NULL DEFAULT false`), thời gian tạo. Đã bỏ cột `role` trong `users` (vai trò `RESCUER` được xác định động khi user thuộc `rescue_team_members`, ngược lại là `USER`). Đã loại bỏ hoàn toàn `password_hash`.
 2. **`rescue_teams`**: Quản lý các đội cứu hộ khẩn cấp: `team_id`, `name`, `description`, `status` (`ACTIVE`, `BUSY`, `INACTIVE`), `created_at`.
 3. **`rescue_team_members`**: Quản lý thành viên từng đội: `member_id`, `team_id`, `user_id`, `role` (`LEADER`, `MEMBER`,...), `created_at`.
-4. **`sos_requests`**: Lưu yêu cầu cứu trợ khớp 100% sơ đồ ERD: `id` (PK), `requester_id` (FK trỏ tới `users`), `team_id` (FK trỏ tới `rescue_teams`), `emergency_type`, `description`, `visibility` (`PUBLIC`/`PRIVATE`), `status` (`WAITING`, `ACCEPTED`, `RESCUING`, `ARRIVED`, `COMPLETED`, `CANCELLED`), `created_at`, `updated_at`.
+4. **`emergency_types`**: Danh mục các loại sự cố khẩn cấp: `id` (PK UUID), `name VARCHAR(50) UNIQUE`, `description TEXT`, `created_at`.
+5. **`sos_requests`**: Lưu yêu cầu cứu trợ: `id` (PK), `requester_id` (FK trỏ tới `users`), `team_id` (FK trỏ tới `rescue_teams`), `emergency_type_id` (FK trỏ tới `emergency_types`), `description`, `visibility` (`PUBLIC`/`PRIVATE`), `status` (`WAITING`, `ACCEPTED`, `RESCUING`, `ARRIVED`, `COMPLETED`, `CANCELLED`), `created_at`, `updated_at`.
    - *Tối giản hóa kiến trúc*: Tọa độ ban đầu của nạn nhân được lưu trực tiếp tại `location_current` (`actor = 'VICTIM'`), đội cứu hộ được liên kết qua `team_id` (thành viên quản lý qua `rescue_team_members`), lịch sử nhận ca và kết thúc ca được ghi vết tại `sos_logs`.
    - **RB04**: Ràng buộc duy nhất `idx_unique_active_requester` trên `requester_id` khi SOS chưa kết thúc (1 nạn nhân chỉ có tối đa 1 SOS hoạt động).
    - **RB05**: Ràng buộc duy nhất `idx_unique_active_team` trên `team_id` khi ca đang xử lý (1 đội cứu hộ chỉ xử lý 1 ca tại 1 thời điểm).
@@ -110,14 +111,15 @@ python test_erd_10_tables.py  # Kiểm thử liên kết đội cứu hộ, nh�
 ## 5. Tóm tắt Hợp đồng REST API & WebSocket
 
 ### 5.1 Xác thực & Tài khoản (`/api/auth`)
-- `POST /api/auth/request-otp`: Nhận `{ phone }`. Gửi OTP 6 chữ số qua Telegram (hiệu lực 5 phút, lưu RAM).
-- `POST /api/auth/verify-otp`: Nhận `{ phone, otp, full_name? }`. Xác thực OTP, cập nhật `is_valid = true`, cấp JWT token và thông tin `user`.
+- `POST /api/auth/request-otp`: Nhận `{ phone, role }`. Kiểm tra: nếu `RESCUER` thì ID phải nằm trong `rescue_team_members`; nếu `USER` thì kiểm tra trong `users`, chưa có thì tạo mới với `full_name = phone`. Gửi OTP 6 chữ số qua Telegram (hiệu lực 5 phút, lưu RAM).
+- `POST /api/auth/verify-otp`: Nhận `{ phone, otp }`. Xác thực OTP, cập nhật `is_valid = true`, cấp JWT token và thông tin `user` (role xác định động).
 - `GET /api/auth/me`: Lấy thông tin tài khoản hiện tại từ Bearer JWT.
 - `POST /api/auth/dev-link-telegram`: Tiện ích dev liên kết nhanh số điện thoại vào bảng `users` (`is_valid = false`).
 
 ### 5.2 Người dùng (`/api/users`)
 - `GET /api/users/profile`: Xem hồ sơ.
-- `PUT /api/users/profile`: Cập nhật `full_name` (client không được tự sửa `role` hay `account_status`).
+- `PUT /api/users/full-name`: Cập nhật `full_name` người dùng sau khi xác thực OTP.
+- `PUT /api/users/profile`: Cập nhật `full_name` (tương thích ngược).
 
 ### 5.3 Yêu cầu Cứu hộ SOS (`/api/sos`)
 - `POST /api/sos`: Tạo SOS mới (`WAITING`). Body: `{ emergency_type, description?, visibility: "PUBLIC"|"PRIVATE", initial_lat, initial_lng }`. Kiểm tra RB04.
@@ -140,7 +142,14 @@ python test_erd_10_tables.py  # Kiểm thử liên kết đội cứu hộ, nh�
 - `GET /api/location/{sos_id}/current`: Lấy tọa độ mới nhất của 2 bên.
 - `GET /api/location/{sos_id}/trail`: Lấy danh sách điểm từ `location_history` để vẽ Polyline.
 
-### 5.6 Kênh WebSocket Real-time (`/ws`)
+### 5.6 Quản lý Loại sự cố (`/api/emergency-types` - CRUD)
+- `GET /api/emergency-types`: Lấy danh sách (hỗ trợ `?search=`).
+- `GET /api/emergency-types/{id}`: Xem chi tiết.
+- `POST /api/emergency-types`: Tạo mới (`{ name, description? }`).
+- `PUT /api/emergency-types/{id}`: Cập nhật (`{ name?, description? }`).
+- `DELETE /api/emergency-types/{id}`: Xóa loại sự cố (chặn xóa nếu đang có SOS sử dụng).
+
+### 5.7 Kênh WebSocket Real-time (`/ws`)
 - Kết nối: `ws://10.0.2.2:8000/ws?token=<JWT_TOKEN>`
 - Các sự kiện đẩy từ server:
   - `NEW_SOS`: Phát cho tất cả RESCUER khi có SOS mới hoặc khi một ca được nhả.

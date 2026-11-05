@@ -39,7 +39,8 @@
 | **03** | Xác thực | `GET` | `/api/auth/me` | Bearer Token | Lấy thông tin tài khoản đang đăng nhập |
 | **04** | Xác thực | `POST` | `/api/auth/dev-link-telegram`| Không | Tiện ích liên kết nhanh SĐT với Telegram Chat ID (DEV) |
 | **05** | Hồ sơ | `GET` | `/api/users/profile` | Bearer Token | Xem thông tin hồ sơ người dùng |
-| **06** | Hồ sơ | `PUT` | `/api/users/profile` | Bearer Token | Cập nhật họ tên hiển thị (chặn sửa role) |
+| **06** | Hồ sơ | `PUT` | `/api/users/full-name` | Bearer Token | Cập nhật lại họ tên người dùng (sau khi xác thực OTP) |
+| **--** | Hồ sơ | `PUT` | `/api/users/profile` | Bearer Token | Cập nhật họ tên hiển thị (tương thích ngược) |
 | **07** | SOS | `POST` | `/api/sos` | Bearer Token | Tạo yêu cầu cứu hộ SOS mới (nạp vào `location_current`) |
 | **08** | SOS | `GET` | `/api/sos/my-active` | Bearer Token | Lấy phiên SOS đang hoạt động của nạn nhân kèm GPS |
 | **09** | SOS | `GET` | `/api/sos/public/map` | Không | Lấy dữ liệu bản đồ cộng đồng (tọa độ làm tròn ~1km) |
@@ -60,7 +61,12 @@
 | **24** | Định vị| `GET` | `/api/location/{sos_id}/current`| Bearer Token| Lấy tọa độ mới nhất của 2 bên (`VICTIM` & `RESCUER`) |
 | **25** | Định vị| `GET` | `/api/location/{sos_id}/trail` | Bearer Token| Lấy danh sách tọa độ lịch sử để vẽ Polyline |
 | **26** | Realtime| `WS` | `/ws?token={jwt}` | Query / Auth | Kênh WebSocket hai chiều thời gian thực |
-| **27** | Hệ thống| `GET` | `/health` | Không | Kiểm tra trạng thái máy chủ và kết nối PostgreSQL |
+| **27** | Loại sự cố| `GET` | `/api/emergency-types` | Không | Lấy danh mục tất cả loại sự cố (phục vụ dropdown SOS) |
+| **28** | Loại sự cố| `GET` | `/api/emergency-types/{id}`| Không | Lấy thông tin chi tiết một loại sự cố |
+| **29** | Loại sự cố| `POST` | `/api/emergency-types` | Bearer Token | Tạo mới loại sự cố khẩn cấp |
+| **30** | Loại sự cố| `PUT` | `/api/emergency-types/{id}`| Bearer Token | Cập nhật tên/mô tả loại sự cố |
+| **31** | Loại sự cố| `DELETE` | `/api/emergency-types/{id}`| Bearer Token| Xóa loại sự cố (chặn xóa nếu đang có SOS sử dụng) |
+| **32** | Hệ thống| `GET` | `/health` | Không | Kiểm tra trạng thái máy chủ và kết nối PostgreSQL |
 
 ---
 
@@ -69,12 +75,13 @@
 ### 3.1 Nhóm Xác Thực & Đăng Nhập (`/api/auth`)
 
 #### 1. Yêu cầu gửi mã OTP (`POST /api/auth/request-otp`)
-* **Mô tả:** Kiểm tra SĐT đã liên kết Telegram chưa, nếu đã liên kết thì sinh mã 6 số gửi qua tin nhắn Telegram.
+* **Mô tả:** Kiểm tra SĐT đã liên kết Telegram chưa và có đúng vai trò (`role`) không. Nếu hợp lệ thì sinh mã 6 số gửi qua tin nhắn Telegram.
 * **Header:** `Content-Type: application/json`
 * **Input (Body):**
 ```json
 {
-  "phone": "0901234567"
+  "phone": "0901234567",
+  "role": "USER"
 }
 ```
 * **Output Thành công (200 OK):**
@@ -87,20 +94,21 @@
 }
 ```
 * **Output Lỗi thường gặp:**
+  - `400 Bad Request`: `"Số điện thoại này không thuộc vai trò 'RESCUER'. Vai trò hiện tại của số điện thoại trong hệ thống là 'USER'."`
   - `400 Bad Request`: `"Số điện thoại này chưa được liên kết với Telegram Bot của hệ thống..."`
+  - `422 Unprocessable Entity`: `"Vai trò không hợp lệ. Chỉ chấp nhận 'USER' hoặc 'RESCUER'."`
   - `429 Too Many Requests`: `"Vui lòng đợi 25 giây trước khi yêu cầu mã OTP mới."`
 
 ---
 
 #### 2. Xác thực OTP & Đăng nhập (`POST /api/auth/verify-otp`)
-* **Mô tả:** Xác minh OTP (RAM), chuyển `is_valid = true` cho tài khoản, cấp JWT token (thời hạn 1 ngày / 24 giờ).
+* **Mô tả:** Xác minh OTP (RAM), chuyển `is_valid = true` cho tài khoản, cấp JWT token (thời hạn 1 ngày / 24 giờ). Khi tạo mới tài khoản, `full_name` mặc định được đặt bằng chính số điện thoại. Vai trò `role` được xác định động qua bảng `rescue_team_members`.
 * **Header:** `Content-Type: application/json`
 * **Input (Body):**
 ```json
 {
   "phone": "0901234567",
-  "otp": "123456",
-  "full_name": "Nguyễn Văn An"
+  "otp": "123456"
 }
 ```
 * **Output Thành công (200 OK):**
@@ -112,7 +120,7 @@
   "token_type": "bearer",
   "user": {
     "id": "f4139613-5ddd-4d6a-888c-f79629762632",
-    "full_name": "Nguyễn Văn An",
+    "full_name": "0901234567",
     "phone": "0901234567",
     "role": "USER",
     "account_status": "ACTIVE",
@@ -124,6 +132,35 @@
   - `400 Bad Request`: `"Mã OTP không chính xác. Bạn còn 4 lần thử."`
   - `400 Bad Request`: `"Bạn đã nhập sai quá 5 lần. Mã OTP đã bị vô hiệu hóa hoàn toàn."`
   - `400 Bad Request`: `"Mã OTP đã hết hạn hoặc chưa được tạo."`
+
+---
+
+#### 2b. Cập nhật họ và tên người dùng (`PUT /api/users/full-name`)
+* **Mô tả:** API chuyên biệt để người dùng cập nhật lại họ tên cá nhân sau khi xác thực OTP thành công.
+* **Header:**
+  - `Content-Type: application/json`
+  - `Authorization: Bearer <access_token>`
+* **Input (Body):**
+```json
+{
+  "full_name": "Nguyễn Văn An"
+}
+```
+* **Output Thành công (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Cập nhật họ tên thành công.",
+  "user": {
+    "id": "f4139613-5ddd-4d6a-888c-f79629762632",
+    "full_name": "Nguyễn Văn An",
+    "phone": "0901234567",
+    "role": "USER",
+    "account_status": "ACTIVE",
+    "is_valid": true
+  }
+}
+```
 
 ---
 
@@ -476,8 +513,8 @@ sequenceDiagram
     Tele->>DB: Ghi nhận telegram_chat_id, is_valid = false
     Tele-->>User: Phản hồi "Đã liên kết Telegram thành công!"
     
-    User->>API: POST /api/auth/request-otp (phone)
-    API->>DB: Kiểm tra phone & telegram_chat_id
+    User->>API: POST /api/auth/request-otp (phone, role)
+    API->>DB: Kiểm tra phone, role & telegram_chat_id
     DB-->>API: Tìm thấy chat_id
     API->>RAM: Sinh OTP 6 số, băm SHA-256 (hạn 5 phút)
     API->>Tele: Gửi tin nhắn chứa mã OTP

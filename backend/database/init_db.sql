@@ -13,6 +13,7 @@ DROP TABLE IF EXISTS sos_logs CASCADE;
 DROP TABLE IF EXISTS location_history CASCADE;
 DROP TABLE IF EXISTS location_current CASCADE;
 DROP TABLE IF EXISTS sos_requests CASCADE;
+DROP TABLE IF EXISTS emergency_types CASCADE;
 DROP TABLE IF EXISTS rescue_team_members CASCADE;
 DROP TABLE IF EXISTS rescue_teams CASCADE;
 DROP TABLE IF EXISTS otp_codes CASCADE;
@@ -31,7 +32,6 @@ CREATE TABLE users (
     full_name VARCHAR(100) NOT NULL,
     phone VARCHAR(15) UNIQUE NOT NULL,
     telegram_chat_id BIGINT UNIQUE,
-    role VARCHAR(10) NOT NULL CHECK (role IN ('USER', 'RESCUER')),
     account_status VARCHAR(10) NOT NULL DEFAULT 'ACTIVE' CHECK (account_status IN ('ACTIVE', 'DISABLED')),
     is_valid BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -67,13 +67,25 @@ CREATE INDEX idx_team_members_team ON rescue_team_members(team_id);
 CREATE INDEX idx_team_members_user ON rescue_team_members(user_id);
 
 -- =============================================================================
--- 4. BẢNG sos_requests: Yêu cầu cứu hộ khẩn cấp (Khớp 100% sơ đồ ERD)
+-- 4. BẢNG emergency_types: Danh mục loại sự cố khẩn cấp
+-- =============================================================================
+CREATE TABLE emergency_types (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(50) UNIQUE NOT NULL,
+    description TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_emergency_types_name ON emergency_types(name);
+
+-- =============================================================================
+-- 5. BẢNG sos_requests: Yêu cầu cứu hộ khẩn cấp
 -- =============================================================================
 CREATE TABLE sos_requests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     requester_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     team_id UUID REFERENCES rescue_teams(team_id) ON DELETE RESTRICT,
-    emergency_type VARCHAR(30) NOT NULL,
+    emergency_type_id UUID NOT NULL REFERENCES emergency_types(id) ON DELETE RESTRICT,
     description TEXT,
     visibility VARCHAR(10) NOT NULL DEFAULT 'PRIVATE' CHECK (visibility IN ('PUBLIC', 'PRIVATE')),
     status VARCHAR(10) NOT NULL DEFAULT 'WAITING' CHECK (status IN ('WAITING', 'ACCEPTED', 'RESCUING', 'ARRIVED', 'COMPLETED', 'CANCELLED')),
@@ -163,11 +175,13 @@ CREATE INDEX idx_logs_sos ON sos_logs(sos_id, created_at ASC);
 CREATE OR REPLACE VIEW public_sos_map AS
 SELECT
     r.id AS sos_id,
-    r.emergency_type,
+    et.name AS emergency_type,
+    r.emergency_type_id,
     ROUND(CAST(lc.lat AS NUMERIC), 2)::DOUBLE PRECISION AS area_lat,
     ROUND(CAST(lc.lng AS NUMERIC), 2)::DOUBLE PRECISION AS area_lng,
     r.created_at
 FROM sos_requests r
+JOIN emergency_types et ON et.id = r.emergency_type_id
 JOIN location_current lc ON lc.sos_id = r.id AND lc.actor = 'VICTIM'
 WHERE r.visibility = 'PUBLIC'
   AND r.status IN ('WAITING', 'ACCEPTED', 'RESCUING', 'ARRIVED');
@@ -179,27 +193,39 @@ WHERE r.visibility = 'PUBLIC'
 CREATE OR REPLACE VIEW rescue_queue AS
 SELECT
     r.id AS sos_id,
-    r.emergency_type,
+    et.name AS emergency_type,
+    r.emergency_type_id,
     r.visibility,
     lc.lat AS initial_lat,
     lc.lng AS initial_lng,
     r.created_at
 FROM sos_requests r
+JOIN emergency_types et ON et.id = r.emergency_type_id
 JOIN location_current lc ON lc.sos_id = r.id AND lc.actor = 'VICTIM'
 WHERE r.status = 'WAITING'
   AND (now() - r.created_at <= INTERVAL '2 hours');
 
 -- =============================================================================
 -- DỮ LIỆU KHỞI TẠO (SEED DATA)
--- Khởi tạo Users có sẵn telegram_chat_id và is_valid = true, các đội cứu hộ
+-- Khởi tạo Emergency Types, Users, các đội cứu hộ
 -- =============================================================================
 
--- 1. Tạo Users mẫu (bao gồm telegram_chat_id và is_valid)
-INSERT INTO users (id, full_name, phone, telegram_chat_id, role, account_status, is_valid) VALUES
-('11111111-1111-1111-1111-111111111111', 'Trần Cứu Hộ (Đội 1)', '0901112222', 100000001, 'RESCUER', 'ACTIVE', true),
-('22222222-2222-2222-2222-222222222222', 'Lê Cứu Hộ (Đội 2)', '0903334444', 100000002, 'RESCUER', 'ACTIVE', true),
-('33333333-3333-3333-3333-333333333333', 'Nguyễn Văn An', '0901234567', 100000003, 'USER', 'ACTIVE', true),
-('44444444-4444-4444-4444-444444444444', 'Trần Thị Bình', '0912345678', 100000004, 'USER', 'ACTIVE', true);
+-- 0. Tạo các loại sự cố khẩn cấp (emergency_types)
+INSERT INTO emergency_types (id, name, description) VALUES
+('eeeeeeee-0001-0000-0000-000000000001', 'NGAP_LUT', 'Ngập lụt, triều cường dâng cao cô lập nhà cửa khu dân cư'),
+('eeeeeeee-0002-0000-0000-000000000002', 'LO_DAT', 'Sạt lở đất đá, chia cắt giao thông và nguy cơ sập nhà'),
+('eeeeeeee-0003-0000-0000-000000000003', 'TAI_NAN', 'Tai nạn giao thông, chấn thương nghiêm trọng cần cứu nạn'),
+('eeeeeeee-0004-0000-0000-000000000004', 'CHAY_NO', 'Hỏa hoạn, cháy nổ nhà dân, xưởng sản xuất cần dập lửa'),
+('eeeeeeee-0005-0000-0000-000000000005', 'MAC_KET', 'Nạn nhân bị mắc kẹt trong đống đổ nát hoặc vùng nguy hiểm'),
+('eeeeeeee-0006-0000-0000-000000000006', 'Y_TE_KHAN_CAP', 'Cấp cứu y tế khẩn cấp, bệnh nhân nguy kịch cần hỗ trợ y bác sĩ'),
+('eeeeeeee-0007-0000-0000-000000000007', 'KHAC', 'Các tình huống khẩn cấp khác cần đội phản ứng nhanh');
+
+-- 1. Tạo Users mẫu (bao gồm telegram_chat_id và is_valid, full_name mặc định là phone)
+INSERT INTO users (id, full_name, phone, telegram_chat_id, account_status, is_valid) VALUES
+('11111111-1111-1111-1111-111111111111', '0901112222', '0901112222', 100000001, 'ACTIVE', true),
+('22222222-2222-2222-2222-222222222222', '0903334444', '0903334444', 100000002, 'ACTIVE', true),
+('33333333-3333-3333-3333-333333333333', '0901234567', '0901234567', 100000003, 'ACTIVE', true),
+('44444444-4444-4444-4444-444444444444', '0912345678', '0912345678', 100000004, 'ACTIVE', true);
 
 -- 2. Tạo Đội Cứu Hộ (rescue_teams)
 INSERT INTO rescue_teams (team_id, name, description, status) VALUES
