@@ -83,7 +83,7 @@ def get_current_user(credentials: Annotated[HTTPAuthorizationCredentials, Depend
             cursor.execute(
                 """
                 SELECT u.id, u.full_name, u.phone, u.account_status, u.is_valid, u.created_at,
-                       CASE WHEN rtm.user_id IS NOT NULL THEN 'RESCUER' ELSE 'USER' END AS role
+                       CASE WHEN rtm.user_id IS NOT NULL THEN 'RESCUER' ELSE 'USER' END AS actual_role
                 FROM users u
                 LEFT JOIN rescue_team_members rtm ON rtm.user_id = u.id
                 WHERE u.id = %s
@@ -104,6 +104,18 @@ def get_current_user(credentials: Annotated[HTTPAuthorizationCredentials, Depend
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Tài khoản đang bị khóa hoặc chưa kích hoạt."
         )
+
+    token_role = (payload.get("role") or "USER").strip().upper()
+    if token_role == "RESCUER":
+        if user["actual_role"] != "RESCUER":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Tài khoản không có quyền RESCUER."
+            )
+        user["role"] = "RESCUER"
+    else:
+        # Khi đăng nhập vai trò USER: cho phép tất cả mọi người (kể cả rescuer muốn dùng vai trò người dân)
+        user["role"] = "USER"
 
     user["id"] = str(user["id"])
     user["is_valid"] = bool(user.get("is_valid", False))

@@ -178,11 +178,23 @@ def test_full_rescue_workflow():
     print_step("8. Đăng nhập tài khoản RESCUER (0901112222)")
     rescuer_phone = "0901112222"
     otp_store.clear(rescuer_phone)
-    # Thử yêu cầu với role USER cho SĐT RESCUER -> 400
-    r_wrong_role = client.post("/api/auth/request-otp", json={"phone": rescuer_phone, "role": "USER"})
-    assert r_wrong_role.status_code == 400, "RESCUER xin OTP với role USER phải bị chặn"
-    print("✅ Kiểm tra chặn SĐT RESCUER gửi role USER:", r_wrong_role.json()["detail"])
+    
+    # 8a. Kiểm tra chặn người dùng thường (test_phone) xin OTP với vai trò RESCUER -> 400
+    r_unauthorized_rescuer = client.post("/api/auth/request-otp", json={"phone": test_phone, "role": "RESCUER"})
+    assert r_unauthorized_rescuer.status_code == 400, "User thường xin OTP với role RESCUER phải bị chặn"
+    print("✅ Kiểm tra chặn User thường xin role RESCUER thành công:", r_unauthorized_rescuer.json()["detail"])
 
+    # 8b. Kiểm tra RESCUER muốn đăng nhập với vai trò USER -> Cho phép thành công!
+    r_rescuer_as_user = client.post("/api/auth/request-otp", json={"phone": rescuer_phone, "role": "USER"})
+    assert r_rescuer_as_user.status_code == 200, "RESCUER xin OTP với role USER phải được phép"
+    otp_rescuer_user = r_rescuer_as_user.json().get("dev_otp")
+    r_verify_rescuer_user = client.post("/api/auth/verify-otp", json={"phone": rescuer_phone, "otp": otp_rescuer_user})
+    assert r_verify_rescuer_user.status_code == 200
+    assert r_verify_rescuer_user.json()["user"]["role"] == "USER"
+    print("✅ Kiểm tra RESCUER đăng nhập với vai trò USER thành công:", r_verify_rescuer_user.json()["user"])
+
+    # 8c. Đăng nhập RESCUER với đúng vai trò RESCUER để tiếp tục các bước cứu hộ sau
+    otp_store.clear(rescuer_phone)
     r_otp_req = client.post("/api/auth/request-otp", json={"phone": rescuer_phone, "role": "RESCUER"})
     assert r_otp_req.status_code == 200
     r_otp_code = r_otp_req.json().get("dev_otp")

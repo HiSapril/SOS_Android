@@ -17,15 +17,22 @@ class InMemoryOtpStore:
         # Cấu trúc: {phone: {"code_hash": str, "expires_at": datetime, "attempt_count": int, "created_at": datetime}}
         self._otps: dict[str, dict] = {}
 
-    def set_otp(self, phone: str, otp_code: str):
+    def set_otp(self, phone: str, otp_code: str, role: str = "USER"):
         now = datetime.now(timezone.utc)
         self._otps[phone] = {
             "code_hash": hash_otp(otp_code),
+            "role": role.strip().upper(),
             "expires_at": now + timedelta(minutes=config.OTP_EXPIRE_MINUTES),
             "attempt_count": 0,
             "created_at": now
         }
-        logger.info(f"Đã lưu OTP trong bộ nhớ cho số điện thoại: {phone}")
+        logger.info(f"Đã lưu OTP trong bộ nhớ cho số điện thoại: {phone} (role={role})")
+
+    def get_role(self, phone: str) -> str:
+        record = self._otps.get(phone)
+        if record:
+            return record.get("role", "USER")
+        return "USER"
 
     def get_last_created_time(self, phone: str) -> datetime | None:
         record = self._otps.get(phone)

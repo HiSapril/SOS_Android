@@ -94,7 +94,7 @@
 }
 ```
 * **Output Lỗi thường gặp:**
-  - `400 Bad Request`: `"Số điện thoại này không thuộc vai trò 'RESCUER'. Vai trò hiện tại của số điện thoại trong hệ thống là 'USER'."`
+  - `400 Bad Request`: `"Số điện thoại này không thuộc đội cứu hộ nào (không có quyền RESCUER)."`
   - `400 Bad Request`: `"Số điện thoại này chưa được liên kết với Telegram Bot của hệ thống..."`
   - `422 Unprocessable Entity`: `"Vai trò không hợp lệ. Chỉ chấp nhận 'USER' hoặc 'RESCUER'."`
   - `429 Too Many Requests`: `"Vui lòng đợi 25 giây trước khi yêu cầu mã OTP mới."`

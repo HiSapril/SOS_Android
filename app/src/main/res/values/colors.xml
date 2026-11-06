@@ -2,4 +2,39 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- Bảng màu tối giản (Minimal): nền trắng, chữ đen, 1 màu nhấn đỏ cho SOS -->
+    <color name="ink">#111111</color>
+    <color name="ink_secondary">#6B6B70</color>
+    <color name="ink_tertiary">#A3A3A8</color>
+    <color name="ink_disabled">#C7C7CC</color>
+
+    <color name="line">#EEEEEE</color>
+    <color name="line_strong">#DCDCDF</color>
+    <color name="fill">#F6F6F7</color>
+    <color name="fill_pressed">#EDEDEF</color>
+
+    <color name="red">#E5383B</color>
+    <color name="red_soft">#FDEEEE</color>
+    <color name="green">#1E9E5A</color>
+    <color name="green_soft">#EAF7F0</color>
+    <color name="amber">#C27C0E</color>
+    <color name="amber_soft">#FDF5E6</color>
+
+    <!-- Tên màu cũ (giữ lại để tương thích), ánh xạ sang bảng màu mới -->
+    <color name="primary">@color/ink</color>
+    <color name="on_primary">@color/white</color>
+    <color name="primary_fixed">@color/fill</color>
+    <color name="sos_red">@color/red</color>
+    <color name="sos_red_container">@color/red</color>
+    <color name="sos_red_light">@color/red_soft</color>
+    <color name="success">@color/green</color>
+    <color name="success_light">@color/green_soft</color>
+    <color name="warning">@color/amber</color>
+    <color name="warning_light">@color/amber_soft</color>
+    <color name="surface">@color/white</color>
+    <color name="on_surface">@color/ink</color>
+    <color name="on_surface_variant">@color/ink_secondary</color>
+    <color name="outline">@color/ink_tertiary</color>
+    <color name="outline_variant">@color/line</color>
 </resources>

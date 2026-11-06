@@ -32,6 +32,7 @@ class RequestOtpDto(BaseModel):
 class VerifyOtpDto(BaseModel):
     phone: str = Field(..., min_length=9, max_length=15, description="Số điện thoại")
     otp: str = Field(..., min_length=6, max_length=6, description="Mã OTP 6 chữ số")
+    role: Optional[str] = Field(None, description="Vai trò muốn đăng nhập: USER hoặc RESCUER (mặc định lấy theo vai trò lúc request-otp)")
 
 class DevLinkTelegramDto(BaseModel):
     phone: str
@@ -81,7 +82,7 @@ async def request_otp(dto: RequestOtpDto):
                     )
             else:
                 # expected_role == "USER":
-                # Kiểm tra đơn giản nằm trong bảng users không, không có thì thêm vào vì là OTP
+                # Bất kỳ ai cũng có thể đăng nhập với vai trò USER (kể cả rescuer muốn dùng vai trò người dân)
                 if not user:
                     cursor.execute(
                         """
@@ -93,12 +94,6 @@ async def request_otp(dto: RequestOtpDto):
                     )
                     user = cursor.fetchone()
                     user["actual_role"] = "USER"
-                elif user["actual_role"] == "RESCUER":
-                    # Đã có trong rescue_team_members (là RESCUER), không cho đăng nhập với vai trò USER
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Số điện thoại này thuộc về Đội cứu hộ (RESCUER). Vui lòng đăng nhập với vai trò RESCUER."
-                    )
 
             if user["account_status"] != "ACTIVE":
                 raise HTTPException(
@@ -132,9 +127,9 @@ async def request_otp(dto: RequestOtpDto):
                 detail=f"Vui lòng đợi {wait_time} giây trước khi yêu cầu mã OTP mới."
             )
 
-    # 3. Sinh mã OTP mới và lưu vào bộ nhớ RAM
+    # 3. Sinh mã OTP mới và lưu vào bộ nhớ RAM (kèm vai trò đăng nhập mong muốn)
     otp_code = generate_otp()
-    otp_store.set_otp(phone, otp_code)
+    otp_store.set_otp(phone, otp_code, role=expected_role)
 
     # 4. Gửi mã OTP qua Telegram
     if chat_id:
@@ -162,11 +157,17 @@ def verify_otp(dto: VerifyOtpDto):
     """
     UC01 - Bước 3 & 4:
     Xác thực mã OTP từ Telegram, cập nhật is_valid = true cho tài khoản, và cấp JWT token.
-    Input chỉ bao gồm phone và otp. Họ tên mặc định ban đầu là số điện thoại.
-    Role được xác định động qua bảng rescue_team_members.
+    Input bao gồm phone và otp (tùy chọn role).
+    Họ tên mặc định ban đầu là số điện thoại.
+    Role được chỉ định từ phiên request-otp (hoặc dto.role).
+    - USER: Ai cũng có thể đăng nhập (kể cả rescuer muốn dùng vai trò người dân).
+    - RESCUER: Chỉ tài khoản thuộc đội cứu hộ (rescue_team_members) mới được phép.
     """
     phone = normalize_phone(dto.phone)
     raw_otp = dto.otp.strip()
+
+    # Lấy vai trò đã yêu cầu ở bước request-otp trước khi verify xóa khỏi RAM
+    saved_role = otp_store.get_role(phone)
 
     # 1. Xác thực mã OTP qua in-memory store
     is_ok, err_msg = otp_store.verify_otp(phone, raw_otp)
@@ -176,13 +177,15 @@ def verify_otp(dto: VerifyOtpDto):
             detail=err_msg
         )
 
-    # 2. Cập nhật hoặc tạo tài khoản trong bảng users và xác định role từ rescue_team_members
+    effective_role = (dto.role or saved_role or "USER").strip().upper()
+
+    # 2. Cập nhật hoặc tạo tài khoản trong bảng users và kiểm tra tính hợp lệ vai trò
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
                 SELECT u.id, u.full_name, u.phone, u.account_status, u.is_valid,
-                       CASE WHEN rtm.user_id IS NOT NULL THEN 'RESCUER' ELSE 'USER' END AS role
+                       CASE WHEN rtm.user_id IS NOT NULL THEN 'RESCUER' ELSE 'USER' END AS actual_role
                 FROM users u
                 LEFT JOIN rescue_team_members rtm ON rtm.user_id = u.id
                 WHERE u.phone = %s
@@ -191,6 +194,13 @@ def verify_otp(dto: VerifyOtpDto):
                 (phone,)
             )
             user = cursor.fetchone()
+
+            if effective_role == "RESCUER":
+                if not user or user["actual_role"] != "RESCUER":
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Số điện thoại này không thuộc đội cứu hộ nào (không có quyền RESCUER)."
+                    )
 
             is_new_user = False
             if not user:
@@ -204,7 +214,6 @@ def verify_otp(dto: VerifyOtpDto):
                     (phone, phone)
                 )
                 user = cursor.fetchone()
-                user["role"] = "USER"
                 is_new_user = True
             else:
                 if user["account_status"] != "ACTIVE":
@@ -223,14 +232,11 @@ def verify_otp(dto: VerifyOtpDto):
                     """,
                     (user["id"],)
                 )
-                updated = cursor.fetchone()
-                role = user["role"]
-                user = updated
-                user["role"] = role
+                user = cursor.fetchone()
                 is_new_user = was_unverified
 
     user_id_str = str(user["id"])
-    access_token = create_access_token(user_id_str, user["phone"], user["role"])
+    access_token = create_access_token(user_id_str, user["phone"], effective_role)
 
     return {
         "success": True,
@@ -241,7 +247,7 @@ def verify_otp(dto: VerifyOtpDto):
             "id": user_id_str,
             "full_name": user["full_name"],
             "phone": user["phone"],
-            "role": user["role"],
+            "role": effective_role,
             "account_status": user["account_status"],
             "is_valid": user["is_valid"]
         }

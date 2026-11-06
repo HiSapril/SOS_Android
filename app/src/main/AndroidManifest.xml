@@ -2,6 +2,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Quyền mạng & WebSocket -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Quyền định vị GPS -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Quyền chạy background service cho định vị thời gian thực -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -10,17 +22,74 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.MyApplication">
+        android:theme="@style/Theme.JavaFinal"
+        android:usesCleartextTraffic="true">
+
+        <!-- 1. Splash Screen (Launcher) -->
         <activity
-            android:name=".MainActivity"
+            android:name=".ui.splash.SplashActivity"
             android:exported="true"
-            android:windowSoftInputMode="adjustResize">
+            android:theme="@style/Theme.JavaFinal.Splash">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Router fallback cho cấu hình chạy mặc định MainActivity -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true" />
+
+        <!-- 2. Đăng nhập & Xác thực OTP -->
+        <activity
+            android:name=".ui.auth.LoginActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- 3. Trang chủ Người dân (USER) -->
+        <activity
+            android:name=".ui.user.HomeActivity"
+            android:exported="false" />
+
+        <!-- 4. Gửi yêu cầu SOS khẩn cấp (USER) -->
+        <activity
+            android:name=".ui.user.SendSosActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- 5. Theo dõi yêu cầu SOS đã gửi (USER) -->
+        <activity
+            android:name=".ui.user.TrackSosActivity"
+            android:exported="false" />
+
+        <!-- 6. Kết quả cứu hộ & Đánh giá (USER) -->
+        <activity
+            android:name=".ui.user.SosResultActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- 7. Trang chủ Đội cứu hộ (RESCUER) -->
+        <activity
+            android:name=".ui.rescuer.RescuerHomeActivity"
+            android:exported="false" />
+
+        <!-- 8. Chi tiết tin báo SOS (RESCUER) -->
+        <activity
+            android:name=".ui.rescuer.SosDetailActivity"
+            android:exported="false" />
+
+        <!-- 9. Bản đồ tác chiến Realtime (RESCUER) -->
+        <activity
+            android:name=".ui.rescuer.RealtimeTrackingActivity"
+            android:exported="false" />
+
+        <!-- 10. Xác nhận hoàn thành ca cứu hộ (RESCUER) -->
+        <activity
+            android:name=".ui.rescuer.ConfirmCompleteActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
     </application>
 
 </manifest>

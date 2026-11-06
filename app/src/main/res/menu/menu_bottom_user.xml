@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Bottom navigation cho người dùng (USER) -->
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_home"
+        android:icon="@drawable/ic_home"
+        android:title="Bản đồ" />
+    <item
+        android:id="@+id/nav_requests"
+        android:icon="@drawable/ic_list"
+        android:title="SOS của tôi" />
+    <item
+        android:id="@+id/nav_alerts"
+        android:icon="@drawable/ic_notifications"
+        android:title="Thông báo" />
+    <item
+        android:id="@+id/nav_settings"
+        android:icon="@drawable/ic_person"
+        android:title="Hồ sơ" />
+</menu>
