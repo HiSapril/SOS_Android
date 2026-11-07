@@ -33,8 +33,12 @@ public final class ApiClient {
 
     public ApiClient(String baseUrl, SessionStore session, Executor callbackExecutor) {
         this(baseUrl, session, callbackExecutor, new OkHttpClient.Builder()
-                .connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS)
-                .callTimeout(45, TimeUnit.SECONDS).retryOnConnectionFailure(false).build(), new Gson());
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .callTimeout(45, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true)
+                .connectionPool(new okhttp3.ConnectionPool(5, 3, TimeUnit.SECONDS))
+                .build(), new Gson());
     }
 
     public ApiClient(String baseUrl, SessionStore session, Executor callbackExecutor,

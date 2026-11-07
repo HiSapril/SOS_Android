@@ -108,7 +108,7 @@ public class RescuerHomeActivity extends ApiActivity {
             return false;
         });
         realtime.getMessages().observe(this, message -> {
-            if (message != null && !"PONG".equals(message.getEvent()) && !"SUBSCRIBED".equals(message.getEvent())) refresh();
+            if (message != null && !"PONG".equals(message.getEvent()) && !"SUBSCRIBED".equals(message.getEvent()) && !"AUTH_SUCCESS".equals(message.getEvent())) refresh();
         });
         realtime.getConnectionState().observe(this, value -> { if (value == RealtimeViewModel.ConnectionState.CONNECTED) refresh(); });
         realtime.getErrors().observe(this, error -> { if (error != null) showApiError(error, this::refresh); });

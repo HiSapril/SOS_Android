@@ -25,6 +25,8 @@ def init_db_pool():
             conninfo=conninfo,
             min_size=2,
             max_size=20,
+            max_idle=300,
+            check=ConnectionPool.check_connection,
             kwargs={"row_factory": dict_row, "options": "-c statement_timeout=15000"}
         )
         _pool.wait()

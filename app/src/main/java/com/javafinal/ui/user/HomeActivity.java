@@ -103,7 +103,7 @@ public class HomeActivity extends MapApiActivity {
             return false;
         });
         realtime.getMessages().observe(this, message -> {
-            if (message != null && !"PONG".equals(message.getEvent()) && !"SUBSCRIBED".equals(message.getEvent())) refresh();
+            if (message != null && !"PONG".equals(message.getEvent()) && !"SUBSCRIBED".equals(message.getEvent()) && !"AUTH_SUCCESS".equals(message.getEvent())) refresh();
         });
         realtime.getErrors().observe(this, error -> { if (error != null && error.isUnauthorized()) showApiError(error, null); });
     }
