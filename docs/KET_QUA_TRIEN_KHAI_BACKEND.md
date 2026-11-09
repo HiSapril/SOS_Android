@@ -162,7 +162,7 @@ backend/
 ### 5.1 Khởi chạy máy chủ Backend
 ```powershell
 cd "d:\Hoc tap\lap trinh di dong\FINAL\backend"
-python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload --reload-dir routes --reload-dir services --reload-dir database --timeout-keep-alive 65
 ```
 
 ### 5.2 Các địa chỉ kết nối:

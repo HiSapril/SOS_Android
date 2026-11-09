@@ -108,7 +108,7 @@ async def request_otp(dto: RequestOtpDto):
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=(
                             "Số điện thoại này chưa được liên kết với Telegram Bot của hệ thống. "
-                            "Vui lòng mở Telegram, tìm bot và nhấn 'Chia sẻ số điện thoại' trước khi yêu cầu OTP."
+                            "Vui lòng mở https://t.me/sos_rescue_bot và nhấn 'Chia sẻ số điện thoại' trước khi yêu cầu OTP."
                         )
                     )
                 chat_id = user.get("telegram_chat_id")

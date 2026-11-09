@@ -91,7 +91,7 @@ pip install -r backend/requirements.txt
 ### Bước 3: Khởi chạy máy chủ Backend
 ```powershell
 cd backend
-python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload --reload-dir routes --reload-dir services --reload-dir database --timeout-keep-alive 65
 ```
 - Máy chủ sẽ chạy tại: `http://localhost:8000`
 - Giao diện tài liệu Swagger UI tương tác: `http://localhost:8000/docs`

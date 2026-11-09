@@ -21,6 +21,9 @@ if sys.stdout.encoding != 'utf-8':
     except Exception:
         pass
 
+import config
+config.DEV_MOCK_OTP = True
+
 client = TestClient(app)
 
 def test_emergency_types_crud():

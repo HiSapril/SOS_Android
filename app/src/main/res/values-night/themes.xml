@@ -1,4 +1,0 @@
-<resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Thiết kế chỉ có giao diện sáng (minimal) nên chế độ tối dùng lại theme sáng ở values/themes.xml. -->
-    <style name="Theme.JavaFinal" parent="Base.Theme.JavaFinal" />
-</resources>
