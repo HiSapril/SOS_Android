@@ -106,7 +106,17 @@ def get_current_user(credentials: Annotated[HTTPAuthorizationCredentials, Depend
         )
 
     token_role = (payload.get("role") or "USER").strip().upper()
-    if token_role == "RESCUER":
+    if token_role == "ADMIN":
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT 1 FROM rescue_team_members WHERE user_id = %s AND role = 'ADMIN' LIMIT 1",
+                    (user_id,),
+                )
+                if not cursor.fetchone():
+                    raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ rescuer có role ADMIN được truy cập quản trị.")
+        user["role"] = "ADMIN"
+    elif token_role == "RESCUER":
         if user["actual_role"] != "RESCUER":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -120,6 +130,13 @@ def get_current_user(credentials: Annotated[HTTPAuthorizationCredentials, Depend
     user["id"] = str(user["id"])
     user["is_valid"] = bool(user.get("is_valid", False))
     return user
+
+def require_admin(current_user: Annotated[dict, Depends(get_current_user)]) -> dict:
+    """Check the current database membership, never trust the client or JWT alone."""
+    if current_user.get("role") != "ADMIN":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ rescuer có role ADMIN được truy cập quản trị.")
+    return current_user
+
 
 def require_rescuer(current_user: Annotated[dict, Depends(get_current_user)]) -> dict:
     """Dependency đảm bảo người dùng có vai trò RESCUER"""

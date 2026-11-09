@@ -74,8 +74,12 @@ def test_full_rescue_workflow():
     assert no_role_res.status_code == 422, "Thiếu role phải bị từ chối 422"
 
     # Role sai giá trị -> 422 Unprocessable Entity
-    invalid_role_res = client.post("/api/auth/request-otp", json={"phone": test_phone, "role": "ADMIN"})
+    invalid_role_res = client.post("/api/auth/request-otp", json={"phone": test_phone, "role": "INVALID_ROLE"})
     assert invalid_role_res.status_code == 422, "Role sai giá trị phải bị từ chối 422"
+
+    # Số điện thoại không có quyền ADMIN gửi role ADMIN -> 403 Forbidden
+    unauth_admin_res = client.post("/api/auth/request-otp", json={"phone": test_phone, "role": "ADMIN"})
+    assert unauth_admin_res.status_code == 403, "Không có quyền ADMIN phải bị từ chối 403"
 
     # Số điện thoại role USER nhưng gửi role RESCUER -> 400 Bad Request
     wrong_role_res = client.post("/api/auth/request-otp", json={"phone": test_phone, "role": "RESCUER"})

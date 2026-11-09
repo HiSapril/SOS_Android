@@ -22,3 +22,6 @@ DEV_MOCK_OTP = os.getenv("DEV_MOCK_OTP", "true").lower() in ("true", "1", "yes")
 OTP_EXPIRE_MINUTES = int(os.getenv("OTP_EXPIRE_MINUTES", "5"))
 OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "5"))
 SOS_TIMEOUT_HOURS = int(os.getenv("SOS_TIMEOUT_HOURS", "2"))
+
+# Optional built React admin, served by FastAPI at /admin/.
+ADMIN_DIST_DIR = os.getenv("ADMIN_DIST_DIR", str((Path(__file__).resolve().parent / "../../../Admin/dist").resolve()))

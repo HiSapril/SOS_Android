@@ -56,6 +56,38 @@ def get_rescue_queue(current_user: dict = Depends(require_rescuer)):
         "data": queue_list
     }
 
+@router.get("/map", summary="Bản đồ tất cả SOS đang hoạt động, cả PUBLIC và PRIVATE (RESCUER)")
+def get_rescuer_sos_map(current_user: dict = Depends(require_rescuer)):
+    """Tọa độ nạn nhân chính xác cho cứu hộ, không dùng view bản đồ công khai đã làm mờ."""
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT s.id AS sos_id, s.emergency_type_id, et.name AS emergency_type,
+                       s.description, s.visibility, s.status, s.created_at,
+                       lc.lat AS initial_lat, lc.lng AS initial_lng
+                FROM sos_requests s
+                JOIN emergency_types et ON et.id = s.emergency_type_id
+                JOIN location_current lc ON lc.sos_id = s.id AND lc.actor = 'VICTIM'
+                WHERE s.status IN ('WAITING', 'ACCEPTED', 'RESCUING', 'ARRIVED')
+                ORDER BY s.created_at DESC, s.id
+                """
+            )
+            rows = cursor.fetchall()
+    items = [{
+        "sos_id": str(row["sos_id"]),
+        "emergency_type_id": str(row["emergency_type_id"]),
+        "emergency_type": row["emergency_type"],
+        "description": row["description"],
+        "visibility": row["visibility"],
+        "status": row["status"],
+        "initial_lat": row["initial_lat"],
+        "initial_lng": row["initial_lng"],
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+    } for row in rows]
+    return {"success": True, "count": len(items), "data": items}
+
+
 @router.get("/my-active", summary="Lấy ca cứu hộ đang xử lý của đội hiện tại")
 def get_my_active_rescue(current_user: dict = Depends(require_rescuer)):
     """

@@ -1,10 +1,12 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 import config
 from database.connection import init_db_pool, close_db_pool, get_db_connection
@@ -17,8 +19,10 @@ from routes.auth import router as auth_router
 from routes.users import router as users_router
 from routes.sos import router as sos_router
 from routes.rescuer import router as rescuer_router
+from routes.team_members import router as team_members_router
 from routes.location import router as location_router
 from routes.emergency_types import router as emergency_types_router
+from routes.admin import router as admin_router
 
 # Thiết lập ghi log
 logging.basicConfig(
@@ -76,8 +80,13 @@ app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(sos_router)
 app.include_router(rescuer_router)
+app.include_router(team_members_router)
 app.include_router(location_router)
 app.include_router(emergency_types_router)
+app.include_router(admin_router)
+
+if (Path(config.ADMIN_DIST_DIR) / "index.html").is_file():
+    app.mount("/admin", StaticFiles(directory=config.ADMIN_DIST_DIR, html=True), name="admin-ui")
 
 @app.get("/", summary="Trang thông tin tổng quan hệ thống")
 def root():

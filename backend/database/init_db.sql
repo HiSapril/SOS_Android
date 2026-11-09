@@ -58,7 +58,7 @@ CREATE TABLE rescue_team_members (
     member_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     team_id UUID NOT NULL REFERENCES rescue_teams(team_id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role VARCHAR(50) NOT NULL DEFAULT 'MEMBER' CHECK (role IN ('LEADER', 'MEMBER', 'DRIVER', 'MEDIC')),
+    role VARCHAR(50) NOT NULL DEFAULT 'MEMBER' CHECK (role IN ('ADMIN', 'LEADER', 'MEMBER', 'DRIVER', 'MEDIC')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT uq_team_member UNIQUE (team_id, user_id)
 );

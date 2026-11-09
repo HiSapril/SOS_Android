@@ -19,20 +19,26 @@ router = APIRouter(prefix="/api/auth", tags=["Xác thực & Tài khoản"])
 
 class RequestOtpDto(BaseModel):
     phone: str = Field(..., min_length=9, max_length=15, description="Số điện thoại của người dùng")
-    role: str = Field(..., description="Vai trò đăng nhập: USER hoặc RESCUER")
+    role: str = Field(..., description="Vai trò đăng nhập: USER, RESCUER hoặc ADMIN")
 
     @field_validator("role")
     @classmethod
     def validate_role(cls, v: str) -> str:
         role_upper = v.strip().upper()
-        if role_upper not in ("USER", "RESCUER"):
-            raise ValueError("Vai trò không hợp lệ. Chỉ chấp nhận 'USER' hoặc 'RESCUER'.")
+        if role_upper not in ("USER", "RESCUER", "ADMIN"):
+            raise ValueError("Vai trò không hợp lệ. Chỉ chấp nhận USER, RESCUER hoặc ADMIN.")
         return role_upper
 
 class VerifyOtpDto(BaseModel):
     phone: str = Field(..., min_length=9, max_length=15, description="Số điện thoại")
     otp: str = Field(..., min_length=6, max_length=6, description="Mã OTP 6 chữ số")
-    role: Optional[str] = Field(None, description="Vai trò muốn đăng nhập: USER hoặc RESCUER (mặc định lấy theo vai trò lúc request-otp)")
+    role: Optional[str] = Field(None, description="USER, RESCUER hoặc ADMIN; phải trùng vai trò lúc request-otp")
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value):
+        return RequestOtpDto.validate_role(value) if value is not None else None
+
 
 class DevLinkTelegramDto(BaseModel):
     phone: str
@@ -57,6 +63,9 @@ async def request_otp(dto: RequestOtpDto):
 
     expected_role = dto.role.strip().upper()
 
+    if not config.DEV_MOCK_OTP and not config.TELEGRAM_BOT_TOKEN:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Máy chủ chưa cấu hình dịch vụ gửi OTP qua Telegram.")
+
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
             # 1. Tìm user theo phone (kèm cờ kiểm tra rescue_team_members)
@@ -73,7 +82,13 @@ async def request_otp(dto: RequestOtpDto):
             )
             user = cursor.fetchone()
 
-            if expected_role == "RESCUER":
+            if expected_role == "ADMIN":
+                if not user:
+                    raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ rescuer có role ADMIN được đăng nhập quản trị.")
+                cursor.execute("SELECT 1 FROM rescue_team_members WHERE user_id = %s AND role = 'ADMIN' LIMIT 1", (user["id"],))
+                if not cursor.fetchone():
+                    raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ rescuer có role ADMIN được đăng nhập quản trị.")
+            elif expected_role == "RESCUER":
                 # Phải tồn tại trong users và id phải nằm trong rescue_team_members
                 if not user or user["actual_role"] != "RESCUER":
                     raise HTTPException(
@@ -103,7 +118,7 @@ async def request_otp(dto: RequestOtpDto):
 
             # Kiểm tra telegram_chat_id
             if not user.get("telegram_chat_id"):
-                if not config.DEV_MOCK_OTP and config.TELEGRAM_BOT_TOKEN:
+                if not config.DEV_MOCK_OTP:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=(
@@ -136,6 +151,9 @@ async def request_otp(dto: RequestOtpDto):
         sent_ok = await send_otp_telegram(phone, chat_id, otp_code)
         if not sent_ok:
             logger.warning(f"Không thể gửi tin nhắn Telegram tới chat_id={chat_id}")
+            if not config.DEV_MOCK_OTP:
+                otp_store.clear(phone)
+                raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Không gửi được mã OTP qua Telegram. Vui lòng thử lại sau.")
     else:
         logger.info(f"[DEV MOCK] Bỏ qua gửi Telegram vì chưa có chat_id. OTP cho {phone} là: {otp_code}")
 
@@ -169,6 +187,9 @@ def verify_otp(dto: VerifyOtpDto):
     # Lấy vai trò đã yêu cầu ở bước request-otp trước khi verify xóa khỏi RAM
     saved_role = otp_store.get_role(phone)
 
+    if dto.role is not None and dto.role != saved_role:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Vai trò xác minh phải trùng với vai trò đã yêu cầu OTP.")
+
     # 1. Xác thực mã OTP qua in-memory store
     is_ok, err_msg = otp_store.verify_otp(phone, raw_otp)
     if not is_ok:
@@ -177,7 +198,7 @@ def verify_otp(dto: VerifyOtpDto):
             detail=err_msg
         )
 
-    effective_role = (dto.role or saved_role or "USER").strip().upper()
+    effective_role = saved_role
 
     # 2. Cập nhật hoặc tạo tài khoản trong bảng users và kiểm tra tính hợp lệ vai trò
     with get_db_connection() as conn:
@@ -195,7 +216,13 @@ def verify_otp(dto: VerifyOtpDto):
             )
             user = cursor.fetchone()
 
-            if effective_role == "RESCUER":
+            if effective_role == "ADMIN":
+                if not user:
+                    raise HTTPException(status.HTTP_403_FORBIDDEN, "Tài khoản không có quyền ADMIN.")
+                cursor.execute("SELECT 1 FROM rescue_team_members WHERE user_id = %s AND role = 'ADMIN' LIMIT 1", (user["id"],))
+                if not cursor.fetchone():
+                    raise HTTPException(status.HTTP_403_FORBIDDEN, "Tài khoản không còn quyền ADMIN.")
+            elif effective_role == "RESCUER":
                 if not user or user["actual_role"] != "RESCUER":
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
@@ -268,6 +295,8 @@ def dev_link_telegram(dto: DevLinkTelegramDto):
     Nếu role là RESCUER, gán vào đội cứu hộ 1 để dynamic role thành RESCUER.
     """
     phone = normalize_phone(dto.phone)
+    if not config.DEV_MOCK_OTP:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy chức năng này.")
     role = (dto.role or "USER").strip().upper()
     with get_db_connection() as conn:
         with conn.cursor() as cursor:

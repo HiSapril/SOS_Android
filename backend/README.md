@@ -97,6 +97,37 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload --reload-dir rout
 - Giao diện tài liệu Swagger UI tương tác: `http://localhost:8000/docs`
 - Địa chỉ truy cập từ máy ảo Android Emulator: `http://10.0.2.2:8000`
 
+### Bản đồ SOS dành cho cứu hộ
+
+Mục **Bản đồ** của rescuer dùng `GET /api/rescuer/map` (cần Bearer token vai trò `RESCUER`), hiển thị cả `PUBLIC` và `PRIVATE` đang ở trạng thái `WAITING`, `ACCEPTED`, `RESCUING`, `ARRIVED`.
+Tọa độ lấy chính xác từ vị trí hiện tại của nạn nhân; marker có loại sự cố, chế độ chia sẻ, trạng thái và mô tả. Có bộ lọc công khai/riêng tư và loại sự cố.
+Bản đồ cộng đồng vẫn dùng `/api/sos/public/map`, chỉ hiển thị `PUBLIC` với tọa độ làm mờ.
+Kiểm thử bằng `.venv\Scripts\python.exe -m unittest test_rescuer_map -v` trong thư mục backend; test dùng schema tạm trên PostgreSQL và tự dọn sau khi chạy.
+
+### Quản lý đội viên trên ứng dụng Android
+
+Từ màn hình cứu hộ, chọn **Xem đội** để mở danh sách đội mình tham gia. Nếu tham gia nhiều đội, chọn đội ở đầu màn hình.
+Đội viên thường chỉ xem danh sách; người có vai trò `LEADER` của đội được thêm, sửa vai trò và xóa đội viên.
+
+- Thêm bằng số điện thoại của tài khoản đã đăng ký và đang hoạt động (`0...` hoặc `+84...`).
+- Các vai trò trong đội: `LEADER` (trưởng đội), `MEMBER` (đội viên), `DRIVER` (lái xe), `MEDIC` (y tế).
+- Sửa vai trò và xóa dùng `member_id` của membership, không dùng `user_id`. Xóa khỏi đội vẫn giữ tài khoản người dùng.
+- Không được xóa hoặc hạ quyền trưởng đội cuối cùng; bổ nhiệm một trưởng đội khác trước khi bàn giao.
+- Quyền được kiểm tra từ database ở mỗi thao tác, chỉ có hiệu lực với đội mà người gọi là trưởng đội.
+
+API mới (cần Bearer token đăng nhập `RESCUER`):
+
+| Phương thức | Đường dẫn | Nội dung |
+| --- | --- | --- |
+| GET | `/api/rescuer/teams/mine` | Đội mình tham gia, đội viên và quyền `can_manage` |
+| GET | `/api/rescuer/teams/{team_id}/members` | Danh sách đội viên của đội mình |
+| POST | `/api/rescuer/teams/{team_id}/members` | Thêm: `{"phone":"0901234567","role":"MEMBER"}` |
+| PUT | `/api/rescuer/teams/{team_id}/members/{member_id}` | Sửa vai trò: `{"role":"MEDIC"}` |
+| DELETE | `/api/rescuer/teams/{team_id}/members/{member_id}` | Xóa khỏi đội |
+
+Không cần thay đổi schema database. Chạy kiểm thử chức năng và phân quyền bằng `.venv\Scripts\python.exe -m unittest test_team_members -v` trong thư mục backend.
+Bộ test dùng schema PostgreSQL tạm, tự dọn sau khi chạy, cần quyền `CREATE SCHEMA` và không sửa dữ liệu ứng dụng hiện có.
+
 ### Bước 4: Chạy kiểm thử tự động
 ```powershell
 cd backend
@@ -160,3 +191,16 @@ python test_erd_10_tables.py  # Kiểm thử liên kết đội cứu hộ, nh�
   - `SOS_COMPLETED`: Báo phiên cứu hộ hoàn tất.
   - `SOS_CANCELLED`: Báo hủy yêu cầu.
   - `LOCATION_BROADCAST`: Tọa độ di chuyển realtime của đối phương để cập nhật marker trên bản đồ.
+
+## 6. Web quản trị React
+
+Source frontend nằm tại `D:/FinalJava/Admin`. Hướng dẫn chạy, cấu hình và API chi tiết trong `../../../Admin/README.md`.
+
+- Chạy migration không reset dữ liệu: `.venv/Scripts/python.exe database/migrate_admin.py`.
+- Cấp quyền cho rescuer có sẵn: `.venv/Scripts/python.exe database/migrate_admin.py --phone 09xxxxxxxx` (thêm `--team-id` nếu thuộc nhiều đội).
+- Đăng nhập bằng số điện thoại/OTP với role `ADMIN`; chỉ rescuer có membership `ADMIN` và tài khoản `ACTIVE` được dùng `/api/admin/*`.
+- API mới: `GET /api/admin/me`, `GET /api/admin/overview`, `GET /api/admin/sos`; CRUD `/api/admin/users`, `/api/admin/rescuers`, `/api/admin/teams`.
+- Từ thư mục `Admin`, chạy `npm install` và `npm run dev`, mở `http://127.0.0.1:5173/`.
+- Sau `npm run build`, khởi động lại backend rồi mở `http://127.0.0.1:8000/admin/`. FastAPI phục vụ bản build tại `ADMIN_DIST_DIR` (mặc định `D:/FinalJava/Admin/dist` trong workspace này).
+- Kiểm thử PostgreSQL độc lập: `.venv/Scripts/python.exe -m unittest test_admin test_team_members test_rescuer_map -v`.
+- Khi dùng OTP thật, đặt `DEV_MOCK_OTP=false` và cấu hình Telegram; dev helper bị tắt trong chế độ này. Với OTP lưu RAM hiện tại, sử dụng một worker backend.
