@@ -582,7 +582,7 @@ def get_sos_logs(sos_id: str, current_user: dict = Depends(get_current_user)):
             cursor.execute(
                 """
                 SELECT l.log_id, l.sos_id, l.user_id, l.action, l.description, l.created_at,
-                       u.full_name AS actor_name
+                       COALESCE(u.full_name, 'Hệ thống') AS actor_name
                 FROM sos_logs l
                 LEFT JOIN users u ON l.user_id = u.id
                 WHERE l.sos_id = %s

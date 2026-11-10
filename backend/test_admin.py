@@ -217,6 +217,37 @@ class AdminTest(unittest.TestCase):
         self.assertIsNone(self.call("get", "/sos").json()["data"][0]["lat"])
         self.assertEqual(self.call("get", "/overview").json()["data"]["waiting_sos"], 1)
 
+    def test_sos_history_filters_pagination_summary_and_logs(self):
+        sid = self.make_sos(status="COMPLETED", with_location=False)
+        with self.db() as conn:
+            conn.execute(
+                "INSERT INTO location_history (sos_id, actor, lat, lng) VALUES (%s, 'VICTIM', 10.776891, 106.700812)",
+                (sid,),
+            )
+            conn.execute(
+                "INSERT INTO sos_logs (sos_id, user_id, action, description) VALUES (%s, %s, 'CREATE_SOS', 'Khởi tạo SOS'), (%s, %s, 'COMPLETE_SOS', 'Hoàn thành')",
+                (sid, self.user_id, sid, self.admin_id),
+            )
+        hist = self.call("get", f"/sos/history?status=COMPLETED&team_id={self.team_id}&emergency_type_id={self.type_id}&q=User%20Test&page=1&page_size=10")
+        self.assertEqual(hist.status_code, 200, hist.text)
+        body = hist.json()
+        self.assertEqual(body["total"], 1)
+        self.assertEqual(body["data"][0]["sos_id"], str(sid))
+        self.assertEqual(body["data"][0]["logs_count"], 2)
+        self.assertEqual(body["data"][0]["lat"], 10.776891)
+
+        summary = self.call("get", "/sos/history/summary")
+        self.assertEqual(summary.status_code, 200, summary.text)
+        self.assertEqual(summary.json()["data"]["total_sos"], 1)
+        self.assertEqual(summary.json()["data"]["completed_count"], 1)
+        self.assertEqual(summary.json()["data"]["success_rate_percent"], 100.0)
+
+        logs = self.call("get", f"/sos/{sid}/logs")
+        self.assertEqual(logs.status_code, 200, logs.text)
+        self.assertEqual(logs.json()["count"], 2)
+        self.assertEqual(logs.json()["data"][0]["actor_name"], "User Test")
+        self.assertEqual(self.call("get", f"/sos/{uuid4()}/logs").status_code, 404)
+
     def test_active_case_blocks_member_removal_and_team_disabling(self):
         self.make_sos(status="ACCEPTED")
         self.assertEqual(self.call("delete", f"/rescuers/{self.member_membership}").status_code, 409)

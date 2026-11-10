@@ -1,6 +1,7 @@
 """Admin APIs. Every endpoint checks an active rescuer ADMIN membership."""
 import re
 from contextlib import contextmanager
+from datetime import date
 from typing import Literal
 from uuid import UUID
 
@@ -157,6 +158,202 @@ def sos_map(q: str = Query("", max_length=100), status: SOSStatus | None = None)
                 (status, status, *([f"%{q}%"] * 4)))
             rows = cursor.fetchall()
     return {"success": True, "data": rows, "count": len(rows)}
+
+
+def _build_sos_history_where(
+    q: str = "",
+    status: SOSStatus | None = None,
+    team_id: UUID | None = None,
+    emergency_type_id: UUID | None = None,
+    from_date: date | None = None,
+    to_date: date | None = None,
+):
+    conditions = []
+    params = []
+
+    if q and q.strip():
+        search_term = f"%{q.strip()}%"
+        conditions.append(
+            "(u.full_name ILIKE %s OR u.phone ILIKE %s OR COALESCE(s.description,'') ILIKE %s OR COALESCE(t.name,'') ILIKE %s OR et.name ILIKE %s)"
+        )
+        params.extend([search_term] * 5)
+
+    if status:
+        conditions.append("s.status = %s")
+        params.append(status)
+
+    if team_id:
+        conditions.append("s.team_id = %s")
+        params.append(team_id)
+
+    if emergency_type_id:
+        conditions.append("s.emergency_type_id = %s")
+        params.append(emergency_type_id)
+
+    if from_date:
+        conditions.append("s.created_at >= %s::date")
+        params.append(str(from_date))
+    if to_date:
+        conditions.append("s.created_at < (%s::date + INTERVAL '1 day')")
+        params.append(str(to_date))
+
+    where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+    return where_clause, params
+
+
+@router.get("/sos/history")
+def rescue_history(
+    q: str = Query("", max_length=100),
+    status: SOSStatus | None = Query(None, description="Lọc trạng thái: COMPLETED, CANCELLED, WAITING, ACCEPTED, RESCUING, ARRIVED hoặc để trống để lấy tất cả"),
+    team_id: UUID | None = Query(None, description="Lọc theo ID đội cứu hộ"),
+    emergency_type_id: UUID | None = Query(None, description="Lọc theo ID loại sự cố"),
+    from_date: date | None = Query(None, description="Từ ngày định dạng YYYY-MM-DD"),
+    to_date: date | None = Query(None, description="Đến ngày định dạng YYYY-MM-DD"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=200),
+):
+    """
+    Xem toàn bộ lịch sử cứu hộ dành cho Quản trị viên (Hỗ trợ phân trang và đa bộ lọc).
+    """
+    where_clause, params = _build_sos_history_where(
+        q=q,
+        status=status,
+        team_id=team_id,
+        emergency_type_id=emergency_type_id,
+        from_date=from_date,
+        to_date=to_date,
+    )
+
+    select_sql = """
+        SELECT s.id AS sos_id, s.description, s.status, s.visibility, s.created_at, s.updated_at,
+               s.emergency_type_id, et.name AS emergency_type, et.description AS emergency_type_description,
+               s.requester_id, u.full_name AS requester_name, u.phone AS requester_phone,
+               s.team_id, t.name AS team_name,
+               COALESCE(lc.lat, lh.lat) AS lat,
+               COALESCE(lc.lng, lh.lng) AS lng,
+               lc.updated_at AS location_updated_at,
+               ROUND(EXTRACT(EPOCH FROM (s.updated_at - s.created_at)))::int AS duration_seconds,
+               (SELECT COUNT(*) FROM sos_logs l WHERE l.sos_id = s.id) AS logs_count
+        FROM sos_requests s
+        JOIN users u ON u.id = s.requester_id
+        JOIN emergency_types et ON et.id = s.emergency_type_id
+        LEFT JOIN rescue_teams t ON t.team_id = s.team_id
+        LEFT JOIN location_current lc ON lc.sos_id = s.id AND lc.actor = 'VICTIM'
+        LEFT JOIN LATERAL (
+            SELECT lat, lng FROM location_history
+            WHERE sos_id = s.id AND actor = 'VICTIM'
+            ORDER BY created_at DESC LIMIT 1
+        ) lh ON lc.sos_id IS NULL
+    """
+
+    order_sql = " ORDER BY s.created_at DESC, s.id DESC"
+
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            return page_result(cursor, select_sql, where_clause, params, order_sql, page, page_size)
+
+
+@router.get("/sos/history/summary")
+def rescue_history_summary(
+    q: str = Query("", max_length=100),
+    status: SOSStatus | None = Query(None, description="Lọc trạng thái"),
+    team_id: UUID | None = Query(None, description="Lọc theo ID đội cứu hộ"),
+    emergency_type_id: UUID | None = Query(None, description="Lọc theo ID loại sự cố"),
+    from_date: date | None = Query(None, description="Từ ngày định dạng YYYY-MM-DD"),
+    to_date: date | None = Query(None, description="Đến ngày định dạng YYYY-MM-DD"),
+):
+    """
+    Trả về các chỉ số KPI thống kê lịch sử cứu trợ theo thời gian thực.
+    """
+    where_clause, params = _build_sos_history_where(
+        q=q,
+        status=status,
+        team_id=team_id,
+        emergency_type_id=emergency_type_id,
+        from_date=from_date,
+        to_date=to_date,
+    )
+
+    sql_query = f"""
+        SELECT
+            COUNT(*) AS total_sos,
+            COUNT(*) FILTER (WHERE s.status = 'COMPLETED') AS completed_count,
+            COUNT(*) FILTER (WHERE s.status = 'CANCELLED') AS cancelled_count,
+            AVG(EXTRACT(EPOCH FROM (s.updated_at - s.created_at)) / 60.0)
+                FILTER (WHERE s.status = 'COMPLETED' AND s.updated_at >= s.created_at) AS avg_duration_minutes
+        FROM sos_requests s
+        JOIN users u ON u.id = s.requester_id
+        JOIN emergency_types et ON et.id = s.emergency_type_id
+        LEFT JOIN rescue_teams t ON t.team_id = s.team_id
+        {where_clause}
+    """
+
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(sql_query, params)
+            row = cursor.fetchone()
+
+    total_sos = int(row["total_sos"] or 0)
+    completed_count = int(row["completed_count"] or 0)
+    cancelled_count = int(row["cancelled_count"] or 0)
+    success_rate_percent = round((completed_count / total_sos) * 100.0, 1) if total_sos > 0 else 0.0
+    average_duration_minutes = (
+        round(float(row["avg_duration_minutes"]), 1)
+        if row["avg_duration_minutes"] is not None
+        else 0.0
+    )
+
+    return {
+        "success": True,
+        "data": {
+            "total_sos": total_sos,
+            "completed_count": completed_count,
+            "cancelled_count": cancelled_count,
+            "success_rate_percent": success_rate_percent,
+            "average_duration_minutes": average_duration_minutes,
+        },
+    }
+
+
+@router.get("/sos/{sos_id}/logs")
+def admin_get_sos_logs(sos_id: UUID):
+    """
+    Quản trị viên xem toàn bộ nhật ký thao tác (audit trail) của một phiên cứu hộ bất kỳ.
+    """
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id FROM sos_requests WHERE id = %s", (sos_id,))
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail="Không tìm thấy yêu cầu SOS.")
+
+            cursor.execute(
+                """
+                SELECT l.log_id, l.sos_id, l.user_id, l.action, l.description, l.created_at,
+                       COALESCE(u.full_name, 'Hệ thống') AS actor_name
+                FROM sos_logs l
+                LEFT JOIN users u ON l.user_id = u.id
+                WHERE l.sos_id = %s
+                ORDER BY l.created_at ASC
+                """,
+                (sos_id,),
+            )
+            logs = cursor.fetchall()
+
+    return {
+        "success": True,
+        "count": len(logs),
+        "data": [
+            {
+                "log_id": str(l["log_id"]),
+                "sos_id": str(l["sos_id"]),
+                "action": l["action"],
+                "description": l["description"],
+                "created_at": l["created_at"].isoformat() if l["created_at"] else None,
+                "actor_name": l["actor_name"],
+            }
+            for l in logs
+        ],
+    }
 
 
 @router.get("/users")

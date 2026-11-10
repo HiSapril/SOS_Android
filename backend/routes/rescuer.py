@@ -151,6 +151,83 @@ def get_my_active_rescue(current_user: dict = Depends(require_rescuer)):
         }
     }
 
+@router.get("/missions", summary="Lấy tất cả các ca cứu hộ của rescuer (ca hiện tại và lịch sử)")
+def get_my_missions(current_user: dict = Depends(require_rescuer)):
+    """
+    Liệt kê tất cả các ca cứu hộ mà rescuer hoặc đội của rescuer đang xử lý hoặc đã từng thực hiện.
+    Ca hiện tại (ACCEPTED, RESCUING, ARRIVED) được xếp lên đầu danh sách.
+    """
+    rescuer_id = current_user["id"]
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT s.id AS sos_id, s.requester_id, s.team_id,
+                       et.name AS emergency_type, s.emergency_type_id,
+                       s.description, s.visibility, s.status,
+                       s.created_at, s.updated_at,
+                       u.full_name AS requester_name, u.phone AS requester_phone,
+                       t.name AS team_name,
+                       EXISTS (
+                           SELECT 1 FROM rescue_team_members m
+                           WHERE m.team_id = s.team_id AND m.user_id = %s
+                       ) AS is_my_team
+                FROM sos_requests s
+                JOIN emergency_types et ON et.id = s.emergency_type_id
+                JOIN users u ON u.id = s.requester_id
+                LEFT JOIN rescue_teams t ON t.team_id = s.team_id
+                WHERE s.team_id IN (
+                    SELECT m.team_id FROM rescue_team_members m WHERE m.user_id = %s
+                )
+                OR EXISTS (
+                    SELECT 1 FROM sos_logs l
+                    WHERE l.sos_id = s.id
+                      AND l.user_id = %s
+                      AND l.action IN ('ACCEPT_SOS', 'STATUS_RESCUING', 'STATUS_ARRIVED', 'UPDATE_STATUS', 'RELEASE_SOS', 'COMPLETE_SOS')
+                )
+                ORDER BY
+                    CASE WHEN s.status IN ('ACCEPTED', 'RESCUING', 'ARRIVED')
+                         AND EXISTS (
+                             SELECT 1 FROM rescue_team_members m2
+                             WHERE m2.team_id = s.team_id AND m2.user_id = %s
+                         )
+                         THEN 0 ELSE 1 END ASC,
+                    COALESCE(s.updated_at, s.created_at) DESC,
+                    s.created_at DESC
+                """,
+                (rescuer_id, rescuer_id, rescuer_id, rescuer_id)
+            )
+            rows = cursor.fetchall()
+
+    items = []
+    for r in rows:
+        is_my_team = bool(r["is_my_team"])
+        effective_status = r["status"] if is_my_team else "RELEASED"
+        items.append({
+            "id": str(r["sos_id"]),
+            "sos_id": str(r["sos_id"]),
+            "emergency_type_id": str(r["emergency_type_id"]) if r["emergency_type_id"] else None,
+            "emergency_type": r["emergency_type"],
+            "description": r["description"],
+            "visibility": r["visibility"],
+            "status": effective_status,
+            "team_id": str(r["team_id"]) if r["team_id"] else None,
+            "team_name": r["team_name"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+            "requester": {
+                "id": str(r["requester_id"]),
+                "full_name": r["requester_name"],
+                "phone": r["requester_phone"]
+            }
+        })
+
+    return {
+        "success": True,
+        "count": len(items),
+        "data": items
+    }
+
 @router.post("/sos/{sos_id}/accept", summary="Nhận yêu cầu cứu hộ (UC09)")
 async def accept_sos(sos_id: str, current_user: dict = Depends(require_rescuer)):
     """
