@@ -2,6 +2,7 @@ import logging
 import math
 from datetime import date, timedelta, timezone
 from typing import Literal, Optional
+from uuid import UUID
 from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel, Field
 import psycopg.errors
@@ -158,11 +159,12 @@ def get_my_missions(
     current_user: dict = Depends(require_rescuer),
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
+    emergency_type_id: Optional[UUID] = None,
 ):
     """
     Liệt kê tất cả các ca cứu hộ mà rescuer hoặc đội của rescuer đang xử lý hoặc đã từng thực hiện.
     Ca hiện tại (ACCEPTED, RESCUING, ARRIVED) được xếp lên đầu danh sách.
-    Lọc lịch sử theo ngày cập nhật cuối (ngày hoàn thành với ca COMPLETED), giờ Việt Nam.
+    Lọc lịch sử theo loại sự cố và ngày cập nhật cuối (ngày hoàn thành với ca COMPLETED), giờ Việt Nam.
     Thống kê chỉ tính ca COMPLETED của đội hiện tại và lộ trình GPS đã lưu của các ca đó.
     """
     if date_from and date_to and date_from > date_to:
@@ -216,7 +218,8 @@ def get_my_missions(
             for row in rows:
                 is_active = row["is_my_team"] and row["status"] in ("ACCEPTED", "RESCUING", "ARRIVED")
                 mission_date = (row["updated_at"] or row["created_at"]).astimezone(vietnam_timezone).date()
-                if is_active or ((date_from is None or mission_date >= date_from)
+                matches_type = emergency_type_id is None or row["emergency_type_id"] == emergency_type_id
+                if is_active or (matches_type and (date_from is None or mission_date >= date_from)
                                  and (date_to is None or mission_date <= date_to)):
                     filtered_rows.append(row)
             rows = filtered_rows

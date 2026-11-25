@@ -110,6 +110,8 @@ Màn hình **Các ca của tôi** dùng `GET /api/rescuer/missions`, có thêm `
 
 Response giữ `success`, `count`, `data` và bổ sung `statistics: {"completed_count": 3, "total_distance_km": 12.34}`. Thống kê chỉ tính ca `COMPLETED` của các đội rescuer đang tham gia, theo ngày hoàn thành; lịch sử lọc theo ngày cập nhật cuối và ca đang xử lý luôn được giữ lại. Quãng đường là tổng khoảng cách giữa các điểm GPS `RESCUER` liên tiếp của từng ca hoàn thành, không nối giữa các ca; ca có dưới hai điểm GPS đóng góp 0 km. Không cần migration database.
 
+Spinner **Loại sự cố** lấy danh mục từ `/api/emergency-types` và gửi thêm `emergency_type_id` (UUID, tùy chọn) vào `/api/rescuer/missions`. Bộ lọc loại kết hợp với khoảng ngày để lọc lịch sử, số ca hoàn thành và tổng km; ca đang xử lý vẫn được giữ lại. Chọn **Tất cả loại sự cố** để bỏ lọc loại, nút **Tất cả** để xóa toàn bộ bộ lọc.
+
 ### Quản lý đội viên trên ứng dụng Android
 
 Từ màn hình cứu hộ, chọn **Xem đội** để mở danh sách đội mình tham gia. Nếu tham gia nhiều đội, chọn đội ở đầu màn hình.
