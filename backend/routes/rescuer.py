@@ -1,5 +1,7 @@
 import logging
-from typing import Literal
+import math
+from datetime import date, timedelta, timezone
+from typing import Literal, Optional
 from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel, Field
 import psycopg.errors
@@ -152,12 +154,23 @@ def get_my_active_rescue(current_user: dict = Depends(require_rescuer)):
     }
 
 @router.get("/missions", summary="Lấy tất cả các ca cứu hộ của rescuer (ca hiện tại và lịch sử)")
-def get_my_missions(current_user: dict = Depends(require_rescuer)):
+def get_my_missions(
+    current_user: dict = Depends(require_rescuer),
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+):
     """
     Liệt kê tất cả các ca cứu hộ mà rescuer hoặc đội của rescuer đang xử lý hoặc đã từng thực hiện.
     Ca hiện tại (ACCEPTED, RESCUING, ARRIVED) được xếp lên đầu danh sách.
+    Lọc lịch sử theo ngày cập nhật cuối (ngày hoàn thành với ca COMPLETED), giờ Việt Nam.
+    Thống kê chỉ tính ca COMPLETED của đội hiện tại và lộ trình GPS đã lưu của các ca đó.
     """
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(status_code=400, detail="Từ ngày phải nhỏ hơn hoặc bằng đến ngày.")
+
     rescuer_id = current_user["id"]
+    vietnam_timezone = timezone(timedelta(hours=7))
+    total_distance_km = 0.0
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -199,6 +212,38 @@ def get_my_missions(current_user: dict = Depends(require_rescuer)):
             )
             rows = cursor.fetchall()
 
+            filtered_rows = []
+            for row in rows:
+                is_active = row["is_my_team"] and row["status"] in ("ACCEPTED", "RESCUING", "ARRIVED")
+                mission_date = (row["updated_at"] or row["created_at"]).astimezone(vietnam_timezone).date()
+                if is_active or ((date_from is None or mission_date >= date_from)
+                                 and (date_to is None or mission_date <= date_to)):
+                    filtered_rows.append(row)
+            rows = filtered_rows
+
+            completed_ids = [row["sos_id"] for row in rows
+                             if row["is_my_team"] and row["status"] == "COMPLETED"]
+            if completed_ids:
+                cursor.execute(
+                    """
+                    SELECT sos_id, lat, lng
+                    FROM location_history
+                    WHERE actor = 'RESCUER' AND sos_id = ANY(%s)
+                    ORDER BY sos_id, created_at, history_id
+                    """,
+                    (completed_ids,)
+                )
+                previous_points = {}
+                for point in cursor.fetchall():
+                    previous = previous_points.get(point["sos_id"])
+                    if previous is not None:
+                        lat1, lng1 = map(math.radians, previous)
+                        lat2, lng2 = map(math.radians, (point["lat"], point["lng"]))
+                        a = (math.sin((lat2 - lat1) / 2) ** 2
+                             + math.cos(lat1) * math.cos(lat2) * math.sin((lng2 - lng1) / 2) ** 2)
+                        total_distance_km += 6371.0 * 2 * math.asin(math.sqrt(min(1.0, max(0.0, a))))
+                    previous_points[point["sos_id"]] = (point["lat"], point["lng"])
+
     items = []
     for r in rows:
         is_my_team = bool(r["is_my_team"])
@@ -225,7 +270,11 @@ def get_my_missions(current_user: dict = Depends(require_rescuer)):
     return {
         "success": True,
         "count": len(items),
-        "data": items
+        "data": items,
+        "statistics": {
+            "completed_count": len(completed_ids),
+            "total_distance_km": round(total_distance_km, 2),
+        },
     }
 
 @router.post("/sos/{sos_id}/accept", summary="Nhận yêu cầu cứu hộ (UC09)")

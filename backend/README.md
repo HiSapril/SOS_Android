@@ -104,6 +104,12 @@ Tọa độ lấy chính xác từ vị trí hiện tại của nạn nhân; mar
 Bản đồ cộng đồng vẫn dùng `/api/sos/public/map`, chỉ hiển thị `PUBLIC` với tọa độ làm mờ.
 Kiểm thử bằng `.venv\Scripts\python.exe -m unittest test_rescuer_map -v` trong thư mục backend; test dùng schema tạm trên PostgreSQL và tự dọn sau khi chạy.
 
+### Lịch sử và thống kê cứu hộ trên Android
+
+Màn hình **Các ca của tôi** dùng `GET /api/rescuer/missions`, có thêm `date_from` và `date_to` dạng `YYYY-MM-DD` (đều tùy chọn, tính cả hai ngày, giờ Việt Nam). Ví dụ: `/api/rescuer/missions?date_from=2026-11-01&date_to=2026-11-25`.
+
+Response giữ `success`, `count`, `data` và bổ sung `statistics: {"completed_count": 3, "total_distance_km": 12.34}`. Thống kê chỉ tính ca `COMPLETED` của các đội rescuer đang tham gia, theo ngày hoàn thành; lịch sử lọc theo ngày cập nhật cuối và ca đang xử lý luôn được giữ lại. Quãng đường là tổng khoảng cách giữa các điểm GPS `RESCUER` liên tiếp của từng ca hoàn thành, không nối giữa các ca; ca có dưới hai điểm GPS đóng góp 0 km. Không cần migration database.
+
 ### Quản lý đội viên trên ứng dụng Android
 
 Từ màn hình cứu hộ, chọn **Xem đội** để mở danh sách đội mình tham gia. Nếu tham gia nhiều đội, chọn đội ở đầu màn hình.
@@ -163,6 +169,7 @@ python test_erd_10_tables.py  # Kiểm thử liên kết đội cứu hộ, nh�
 ### 5.4 Nghiệp vụ Đội Cứu Hộ (`/api/rescuer` - Yêu cầu role RESCUER)
 - `GET /api/rescuer/queue`: Hàng đợi các SOS `WAITING` từ View `rescue_queue`.
 - `GET /api/rescuer/my-active`: Lấy ca cứu hộ đội đang xử lý.
+- `GET /api/rescuer/missions?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`: Lịch sử kèm số ca hoàn thành và tổng quãng đường GPS (km); có thể bỏ bộ lọc ngày.
 - `POST /api/rescuer/sos/{id}/accept`: Tiếp nhận ca (nguyên tử RB06, kiểm tra RB05).
 - `POST /api/rescuer/sos/{id}/status`: Cập nhật tiến trình (`RESCUING` -> `ARRIVED`).
 - `POST /api/rescuer/sos/{id}/release`: Nhả ca (quay về `WAITING`, xóa dấu vết rescuer, vào lại hàng đợi).
